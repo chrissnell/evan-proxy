@@ -10,14 +10,102 @@
 <div class="container">
   <div class="header">
     <h1>evan-proxy</h1>
-    <a href="#" id="logout">logout</a>
+    <div class="header-controls">
+      <button class="theme-toggle" id="theme-toggle" title="Toggle theme">light</button>
+      <a href="#" id="logout">logout</a>
+    </div>
   </div>
+
   <div class="box center">
     <div class="status" id="status">loading...</div>
     <button class="btn-toggle" id="toggle" disabled>loading...</button>
   </div>
+
+  <div class="grid-2">
+    <div class="box">
+      <h2>top sites &middot; 1h</h2>
+      <ul class="host-list" id="top-sites">
+        <li><span class="empty">waiting for data...</span></li>
+      </ul>
+    </div>
+    <div class="box">
+      <h2>dns blocked &middot; 1h</h2>
+      <ul class="host-list" id="top-blocked">
+        <li><span class="empty">waiting for data...</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="box">
+    <h2>traffic &middot; 10 min</h2>
+    <canvas id="traffic-canvas"></canvas>
+    <div class="graph-legend">
+      <span class="legend-bytes">bytes</span>
+      <span class="legend-reqs">requests</span>
+    </div>
+  </div>
+
+  <div class="box">
+    <h2>log tail</h2>
+    <div id="log-tail"></div>
+  </div>
 </div>
+
 <script>
+// --- Theme ---
+function getThemeColors() {
+  var s = getComputedStyle(document.documentElement);
+  return {
+    graphFill: s.getPropertyValue('--graph-fill').trim(),
+    graphStroke: s.getPropertyValue('--graph-stroke').trim(),
+    graphReq: s.getPropertyValue('--graph-req').trim(),
+    fgDim: s.getPropertyValue('--fg-dim').trim(),
+  };
+}
+
+function initTheme() {
+  var saved = localStorage.getItem('evan-proxy-theme');
+  if (saved === 'light' || saved === 'dark') {
+    document.documentElement.setAttribute('data-theme', saved);
+  }
+  updateThemeButton();
+}
+
+function updateThemeButton() {
+  var btn = document.getElementById('theme-toggle');
+  var theme = document.documentElement.getAttribute('data-theme');
+  if (!theme) {
+    // Using OS default
+    var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    btn.textContent = isDark ? 'light' : 'dark';
+  } else {
+    btn.textContent = theme === 'dark' ? 'light' : 'dark';
+  }
+}
+
+document.getElementById('theme-toggle').addEventListener('click', function() {
+  var current = document.documentElement.getAttribute('data-theme');
+  var isDarkOS = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  if (!current) {
+    // Currently using OS default, switch to opposite
+    var next = isDarkOS ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('evan-proxy-theme', next);
+  } else if (current === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    localStorage.setItem('evan-proxy-theme', 'light');
+  } else {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    localStorage.setItem('evan-proxy-theme', 'dark');
+  }
+  updateThemeButton();
+  refreshTraffic(); // redraw graph with new colors
+});
+
+initTheme();
+
+// --- Status & Toggle ---
 async function loadStatus() {
   const resp = await fetch('/api/status');
   if (resp.status === 401) { window.location.href = '/login'; return; }
@@ -54,6 +142,167 @@ document.getElementById('logout').addEventListener('click', async (e) => {
 });
 
 loadStatus();
+
+// --- Top Sites & Blocked ---
+function renderList(id, items) {
+  const el = document.getElementById(id);
+  if (!items || items.length === 0) {
+    el.innerHTML = '<li><span class="empty">no data</span></li>';
+    return;
+  }
+  el.innerHTML = items.map(function(h, i) {
+    return '<li><span class="rank">' + (i + 1) + '.</span><span class="host">' +
+      escHtml(h.host) + '</span><span class="count">' + h.count + '</span></li>';
+  }).join('');
+}
+
+async function refreshStats() {
+  try {
+    const [sites, blocked] = await Promise.all([
+      fetch('/api/stats/top-sites').then(function(r) { return r.json(); }),
+      fetch('/api/stats/top-blocked').then(function(r) { return r.json(); }),
+    ]);
+    renderList('top-sites', sites);
+    renderList('top-blocked', blocked);
+  } catch (e) { /* retry next cycle */ }
+}
+
+setInterval(refreshStats, 5000);
+refreshStats();
+
+// --- Traffic Graph ---
+function drawGraph(buckets) {
+  var canvas = document.getElementById('traffic-canvas');
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  var w = rect.width, h = rect.height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  var tc = getThemeColors();
+
+  if (!buckets || buckets.length === 0) {
+    ctx.fillStyle = tc.fgDim;
+    ctx.font = '11px Inconsolata';
+    ctx.fillText('no traffic data', w / 2 - 40, h / 2);
+    return;
+  }
+
+  var maxBytes = Math.max.apply(null, buckets.map(function(b) { return b.br + b.bw; })) || 1;
+  var maxReqs = Math.max.apply(null, buckets.map(function(b) { return b.reqs; })) || 1;
+  var barW = w / buckets.length;
+  var pad = 16;
+
+  // Bytes filled area
+  ctx.fillStyle = tc.graphFill;
+  ctx.strokeStyle = tc.graphStroke;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  buckets.forEach(function(b, i) {
+    var y = h - ((b.br + b.bw) / maxBytes) * (h - pad);
+    var x = i * barW + barW / 2;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  var lastX = (buckets.length - 1) * barW + barW / 2;
+  ctx.lineTo(lastX, h);
+  ctx.lineTo(barW / 2, h);
+  ctx.fill();
+
+  // Bytes line
+  ctx.beginPath();
+  buckets.forEach(function(b, i) {
+    var y = h - ((b.br + b.bw) / maxBytes) * (h - pad);
+    var x = i * barW + barW / 2;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Requests line
+  ctx.strokeStyle = tc.graphReq;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  buckets.forEach(function(b, i) {
+    var y = h - (b.reqs / maxReqs) * (h - pad);
+    var x = i * barW + barW / 2;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Labels
+  ctx.fillStyle = tc.fgDim;
+  ctx.font = '10px Inconsolata';
+  ctx.fillText('reqs: ' + maxReqs, 4, 11);
+  ctx.textAlign = 'right';
+  ctx.fillText(fmtBytes(maxBytes), w - 4, 11);
+  ctx.textAlign = 'left';
+}
+
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+  return (b / 1073741824).toFixed(1) + ' GB';
+}
+
+async function refreshTraffic() {
+  try {
+    var data = await fetch('/api/stats/traffic').then(function(r) { return r.json(); });
+    drawGraph(data);
+  } catch (e) { /* retry next cycle */ }
+}
+
+setInterval(refreshTraffic, 10000);
+refreshTraffic();
+
+// --- Log Tail (SSE) ---
+function startLogTail() {
+  var logEl = document.getElementById('log-tail');
+  var es = new EventSource('/api/logs');
+
+  es.onmessage = function(ev) {
+    var e = JSON.parse(ev.data);
+    var ts = (e.ts || '').substring(11, 23);
+    var event = (e.event || '-').padEnd(9);
+    var method = (e.method || '').padEnd(7);
+    var host = (e.host || '').substring(0, 35).padEnd(35);
+    var status = String(e.status || 0);
+    var bytes = (e.bytes_read || 0) + '/' + (e.bytes_written || 0);
+
+    var line = ts + '  ' + event + '  ' + method + '  ' + host + '  ' + status + '  ' + bytes;
+
+    var span = document.createElement('span');
+    if (e.event === 'dns-block') span.className = 'log-block';
+    else if (e.status >= 400) span.className = 'log-err';
+    else span.className = 'log-ok';
+    span.textContent = line + '\n';
+    logEl.appendChild(span);
+
+    // Cap at 200 lines
+    while (logEl.childNodes.length > 200) {
+      logEl.removeChild(logEl.firstChild);
+    }
+
+    // Auto-scroll if near bottom
+    var atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+    if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+  };
+}
+
+startLogTail();
+
+// --- Util ---
+function escHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
 </script>
 </body>
 </html>

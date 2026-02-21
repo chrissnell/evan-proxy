@@ -2,16 +2,19 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"evan-proxy/pkg/auth"
+	"evan-proxy/pkg/stats"
 )
 
 type api struct {
 	auth     *auth.AdminAuth
 	state    *ProxyState
 	sessions *SessionStore
+	stats    *stats.Collector
 }
 
 type loginRequest struct {
@@ -111,5 +114,46 @@ func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		next(w, r)
+	}
+}
+
+func (a *api) handleTopSites(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(a.stats.TopHosts(10))
+}
+
+func (a *api) handleTopBlocked(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(a.stats.TopBlocked(10))
+}
+
+func (a *api) handleTraffic(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(a.stats.Traffic(60))
+}
+
+func (a *api) handleLogs(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ch := a.stats.Subscribe()
+	defer a.stats.Unsubscribe(ch)
+
+	for {
+		select {
+		case entry := <-ch:
+			data, _ := json.Marshal(entry)
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/proxy"
 	"evan-proxy/pkg/ratelimit"
+	"evan-proxy/pkg/stats"
 )
 
 func main() {
@@ -34,10 +35,13 @@ func main() {
 	a := acl.AllowAll{}
 	limiter := ratelimit.New(cfg.AuthFailRateLimit, cfg.AuthFailWindow)
 	logger := logging.New(os.Stdout, cfg.LogFormat)
+	collector := stats.NewCollector()
+	logger.AddObserver(collector.Observe)
 	state := admin.NewProxyState()
 
-	proxyHandler := proxy.New(cfg, users, a, limiter, logger, state)
-	adminServer := admin.NewServer(adminAuth, state)
+	counter := stats.NewTrafficCounter(collector)
+	proxyHandler := proxy.New(cfg, users, a, limiter, logger, counter, state)
+	adminServer := admin.NewServer(adminAuth, state, collector)
 
 	// Plain proxy listener
 	plainSrv := &http.Server{
@@ -46,13 +50,12 @@ func main() {
 		IdleTimeout: cfg.IdleTimeout,
 	}
 
-	// Admin listener
+	// Admin listener (no WriteTimeout -- SSE log streaming needs long-lived responses)
 	adminSrv := &http.Server{
-		Addr:         cfg.AdminListen,
-		Handler:      adminServer,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        cfg.AdminListen,
+		Handler:     adminServer,
+		ReadTimeout: 10 * time.Second,
+		IdleTimeout: 120 * time.Second,
 	}
 
 	// Start servers
@@ -103,5 +106,7 @@ func main() {
 		tlsSrv.Shutdown(ctx)
 	}
 	adminSrv.Shutdown(ctx)
+	counter.Stop()
+	collector.Stop()
 	limiter.Stop()
 }

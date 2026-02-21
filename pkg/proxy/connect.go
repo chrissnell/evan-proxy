@@ -129,22 +129,23 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		Host: host, User: user, Status: 200,
 	})
 
-	// Bidirectional copy with byte counting
-	var bytesRead, bytesWritten int64
+	// Bidirectional copy with live byte counting
+	readCounter := h.counter.NewWriter(targetConn, true)
+	writeCounter := h.counter.NewWriter(conn, false)
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		n, _ := io.Copy(targetConn, bufrw) // client -> target
-		bytesRead = n
+		io.Copy(readCounter, bufrw) // client -> target
+		readCounter.Close()
 		targetConn.(*net.TCPConn).CloseWrite()
 	}()
 
 	go func() {
 		defer wg.Done()
-		n, _ := io.Copy(conn, targetConn) // target -> client
-		bytesWritten = n
+		io.Copy(writeCounter, targetConn) // target -> client
+		writeCounter.Close()
 	}()
 
 	wg.Wait()
@@ -158,7 +159,7 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		User:         user,
 		Status:       200,
 		DurationMS:   time.Since(start).Milliseconds(),
-		BytesRead:    bytesRead,
-		BytesWritten: bytesWritten,
+		BytesRead:    readCounter.Total(),
+		BytesWritten: writeCounter.Total(),
 	})
 }

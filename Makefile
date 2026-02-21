@@ -1,8 +1,9 @@
 APP      := evan-proxy
 IMAGE    := ghcr.io/chrissnell/evan-proxy
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+PLATFORM ?= linux/amd64
 
-.PHONY: build test clean docker docker-push
+.PHONY: build test clean docker docker-push deploy
 
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w" -o $(APP) .
@@ -14,8 +15,10 @@ clean:
 	rm -f $(APP)
 
 docker:
-	docker build -t $(IMAGE):$(VERSION) -t $(IMAGE):latest .
+	docker buildx build --platform $(PLATFORM) -t $(IMAGE):$(VERSION) .
 
-docker-push: docker
-	docker push $(IMAGE):$(VERSION)
-	docker push $(IMAGE):latest
+docker-push:
+	docker buildx build --platform $(PLATFORM) -t $(IMAGE):$(VERSION) --push .
+
+deploy: docker-push
+	helm upgrade evan-proxy helm/evan-proxy -n evan-proxy -f ~/kube/evan-proxy/values.yaml --set image.tag=$(VERSION)

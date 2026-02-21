@@ -15,6 +15,7 @@ import (
 	"evan-proxy/pkg/config"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/ratelimit"
+	"evan-proxy/pkg/stats"
 )
 
 // ErrDNSBlocked is returned when DNS resolves to a loopback or null address.
@@ -25,6 +26,7 @@ type Handler struct {
 	acl       acl.ACL
 	limiter   *ratelimit.Limiter
 	logger    *logging.Logger
+	counter   *stats.TrafficCounter
 	transport *http.Transport
 	dial      func(ctx context.Context, network, address string) (net.Conn, error)
 	state     *admin.ProxyState
@@ -43,7 +45,7 @@ func isDNSBlocked(ip net.IP) bool {
 	return ip.IsLoopback() || ip.Equal(net.IPv4zero) || loopbackNet.Contains(ip)
 }
 
-func New(cfg *config.Config, users *auth.UserStore, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, state *admin.ProxyState) *Handler {
+func New(cfg *config.Config, users *auth.UserStore, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, state *admin.ProxyState) *Handler {
 	dialer := &net.Dialer{
 		Timeout: cfg.ConnectDialTimeout,
 	}
@@ -99,6 +101,7 @@ func New(cfg *config.Config, users *auth.UserStore, a acl.ACL, rl *ratelimit.Lim
 		acl:       a,
 		limiter:   rl,
 		logger:    lg,
+		counter:   tc,
 		transport: transport,
 		dial:      dialWithBlockCheck,
 		state:     state,

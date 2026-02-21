@@ -21,6 +21,12 @@
   </div>
 </div>
 <script>
+// Apply saved theme
+var savedTheme = localStorage.getItem('evan-proxy-theme');
+if (savedTheme === 'light' || savedTheme === 'dark') {
+  document.documentElement.setAttribute('data-theme', savedTheme);
+}
+
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const errEl = document.getElementById('error');

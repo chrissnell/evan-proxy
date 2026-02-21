@@ -23,10 +23,19 @@ type Entry struct {
 }
 
 type Logger struct {
-	mu     sync.Mutex
-	w      io.Writer
-	format string
-	enc    *json.Encoder
+	mu        sync.Mutex
+	w         io.Writer
+	format    string
+	enc       *json.Encoder
+	observers []func(Entry)
+}
+
+// AddObserver registers a callback invoked on each Log call.
+// Observers run under the logger mutex and must not block.
+func (l *Logger) AddObserver(fn func(Entry)) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.observers = append(l.observers, fn)
 }
 
 func New(w io.Writer, format string) *Logger {
@@ -43,34 +52,34 @@ func (l *Logger) Log(e Entry) {
 
 	if l.format == "json" {
 		l.enc.Encode(e)
-		return
+	} else {
+		user := e.User
+		if user == "" {
+			user = "-"
+		}
+		uri := e.Host
+		if e.URI != "" {
+			uri = e.URI
+		}
+		event := e.Event
+		if event == "" {
+			event = "-"
+		}
+		fmt.Fprintf(l.w, "%s  %-5s  %-15s  %-7s  %-40s  %-16s  %d  %dms  %d/%d\n",
+			e.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"),
+			event,
+			e.ClientIP,
+			e.Method,
+			uri,
+			user,
+			e.Status,
+			e.DurationMS,
+			e.BytesRead,
+			e.BytesWritten,
+		)
 	}
 
-	// Human-readable: timestamp  method  host  user  status  duration  bytes_in/bytes_out
-	user := e.User
-	if user == "" {
-		user = "-"
+	for _, fn := range l.observers {
+		fn(e)
 	}
-	uri := e.Host
-	if e.URI != "" {
-		uri = e.URI
-	}
-
-	event := e.Event
-	if event == "" {
-		event = "-"
-	}
-
-	fmt.Fprintf(l.w, "%s  %-5s  %-15s  %-7s  %-40s  %-16s  %d  %dms  %d/%d\n",
-		e.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"),
-		event,
-		e.ClientIP,
-		e.Method,
-		uri,
-		user,
-		e.Status,
-		e.DurationMS,
-		e.BytesRead,
-		e.BytesWritten,
-	)
 }

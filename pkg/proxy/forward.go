@@ -114,7 +114,9 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(resp.StatusCode)
-	bytesWritten, _ := io.Copy(w, resp.Body)
+	cw := h.counter.NewWriter(w, false)
+	io.Copy(cw, resp.Body)
+	cw.Close()
 
 	h.logger.Log(logging.Entry{
 		Timestamp:    start,
@@ -125,7 +127,7 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 		User:         user,
 		Status:       resp.StatusCode,
 		DurationMS:   time.Since(start).Milliseconds(),
-		BytesWritten: bytesWritten,
+		BytesWritten: cw.Total(),
 	})
 }
 

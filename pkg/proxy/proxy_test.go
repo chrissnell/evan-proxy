@@ -21,6 +21,7 @@ import (
 	"evan-proxy/pkg/config"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/ratelimit"
+	"evan-proxy/pkg/stats"
 )
 
 func setupProxy(t *testing.T) (*Handler, *admin.ProxyState) {
@@ -47,7 +48,12 @@ func setupProxy(t *testing.T) (*Handler, *admin.ProxyState) {
 	logger := logging.New(io.Discard, "human")
 	state := admin.NewProxyState()
 
-	h := New(cfg, users, acl.AllowAll{}, limiter, logger, state)
+	collector := stats.NewCollector()
+	t.Cleanup(collector.Stop)
+	counter := stats.NewTrafficCounter(collector)
+	t.Cleanup(counter.Stop)
+
+	h := New(cfg, users, acl.AllowAll{}, limiter, logger, counter, state)
 	return h, state
 }
 
