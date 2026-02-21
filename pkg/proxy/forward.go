@@ -40,14 +40,15 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 		h.logger.Log(logging.Entry{
 			Timestamp: start, ClientIP: clientIP, Method: r.Method,
 			Host: host, URI: r.RequestURI, Status: 407,
+			Error:      "rate limited",
 			DurationMS: time.Since(start).Milliseconds(),
 		})
 		return
 	}
 
 	// Auth check
-	user, authenticated := h.users.Check(r.Header.Get("Proxy-Authorization"))
-	if !authenticated {
+	user, authErr := h.users.Check(r.Header.Get("Proxy-Authorization"))
+	if authErr != nil {
 		h.limiter.RecordFailure(clientIP)
 		w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
 		w.Header().Set("Proxy-Connection", "keep-alive")
@@ -56,6 +57,7 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 		h.logger.Log(logging.Entry{
 			Timestamp: start, ClientIP: clientIP, Method: r.Method,
 			Host: host, URI: r.RequestURI, Status: 407,
+			Error:      authErr.Error(),
 			DurationMS: time.Since(start).Milliseconds(),
 		})
 		return

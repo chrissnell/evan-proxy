@@ -17,21 +17,21 @@ func bcryptHash(t *testing.T, password string) string {
 
 func TestAdminAuthValid(t *testing.T) {
 	aa := NewAdminAuth("admin", bcryptHash(t, "secret"))
-	if !aa.Check("admin", "secret") {
-		t.Error("expected valid credentials to pass")
+	if err := aa.Check("admin", "secret"); err != nil {
+		t.Errorf("expected valid credentials to pass, got: %v", err)
 	}
 }
 
 func TestAdminAuthWrongPassword(t *testing.T) {
 	aa := NewAdminAuth("admin", bcryptHash(t, "secret"))
-	if aa.Check("admin", "wrong") {
+	if err := aa.Check("admin", "wrong"); err == nil {
 		t.Error("expected wrong password to fail")
 	}
 }
 
 func TestAdminAuthWrongUser(t *testing.T) {
 	aa := NewAdminAuth("admin", bcryptHash(t, "secret"))
-	if aa.Check("wrong", "secret") {
+	if err := aa.Check("wrong", "secret"); err == nil {
 		t.Error("expected wrong username to fail")
 	}
 }

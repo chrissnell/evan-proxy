@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -47,7 +48,8 @@ func (a *api) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if !a.auth.Check(req.Username, req.Password) {
+	if err := a.auth.Check(req.Username, req.Password); err != nil {
+		log.Printf("admin login failed from %s: %v", r.RemoteAddr, err)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}

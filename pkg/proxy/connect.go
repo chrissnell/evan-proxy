@@ -35,7 +35,8 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 		h.logger.Log(logging.Entry{
 			Timestamp: start, ClientIP: clientIP, Method: "CONNECT",
-			Host: host, Status: 407, DurationMS: time.Since(start).Milliseconds(),
+			Host: host, Status: 407, Error: "rate limited",
+			DurationMS: time.Since(start).Milliseconds(),
 		})
 		return
 	}
@@ -53,9 +54,9 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	// Check auth on initial request
-	user, authenticated := h.users.Check(r.Header.Get("Proxy-Authorization"))
+	user, authErr := h.users.Check(r.Header.Get("Proxy-Authorization"))
 
-	if !authenticated {
+	if authErr != nil {
 		// Send 407 challenge — keep connection alive for iOS retry
 		conn.Write([]byte(
 			"HTTP/1.1 407 Proxy Authentication Required\r\n" +
@@ -72,20 +73,22 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 			h.limiter.RecordFailure(clientIP)
 			h.logger.Log(logging.Entry{
 				Timestamp: start, ClientIP: clientIP, Method: "CONNECT",
-				Host: host, Status: 407, DurationMS: time.Since(start).Milliseconds(),
+				Host: host, Status: 407, Error: authErr.Error() + "; retry read failed",
+				DurationMS: time.Since(start).Milliseconds(),
 			})
 			return
 		}
 		conn.SetReadDeadline(time.Time{}) // clear deadline
 
 		host = retry.Host
-		user, authenticated = h.users.Check(retry.Header.Get("Proxy-Authorization"))
-		if !authenticated {
+		user, authErr = h.users.Check(retry.Header.Get("Proxy-Authorization"))
+		if authErr != nil {
 			h.limiter.RecordFailure(clientIP)
 			conn.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n"))
 			h.logger.Log(logging.Entry{
 				Timestamp: start, ClientIP: clientIP, Method: "CONNECT",
-				Host: host, Status: 407, DurationMS: time.Since(start).Milliseconds(),
+				Host: host, Status: 407, Error: authErr.Error(),
+				DurationMS: time.Since(start).Milliseconds(),
 			})
 			return
 		}

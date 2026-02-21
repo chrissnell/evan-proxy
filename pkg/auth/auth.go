@@ -4,9 +4,17 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+)
+
+var (
+	ErrNoCredentials    = errors.New("no credentials")
+	ErrMalformedAuth    = errors.New("malformed auth header")
+	ErrUnknownUser      = errors.New("unknown user")
+	ErrWrongPassword    = errors.New("wrong password")
 )
 
 // UserStore holds multiple proxy users for Basic auth validation.
@@ -50,24 +58,28 @@ func LoadUsers(path string) (*UserStore, error) {
 }
 
 // Check validates a Proxy-Authorization header value.
-// Returns the username if valid, empty string if not.
-func (us *UserStore) Check(proxyAuthHeader string) (string, bool) {
+// Returns (username, nil) on success, or ("", error) describing the failure.
+func (us *UserStore) Check(proxyAuthHeader string) (string, error) {
+	if proxyAuthHeader == "" {
+		return "", ErrNoCredentials
+	}
+
 	user, pass, ok := parseBasicAuth(proxyAuthHeader)
 	if !ok {
-		return "", false
+		return "", ErrMalformedAuth
 	}
 
 	expected, exists := us.users[user]
 	if !exists {
 		// Constant-time compare against dummy to prevent timing leak
 		subtle.ConstantTimeCompare([]byte(pass), []byte("dummy-password-for-timing"))
-		return "", false
+		return "", fmt.Errorf("%w: %q", ErrUnknownUser, user)
 	}
 
 	if subtle.ConstantTimeCompare([]byte(pass), expected) == 1 {
-		return user, true
+		return user, nil
 	}
-	return "", false
+	return "", fmt.Errorf("%w: %q", ErrWrongPassword, user)
 }
 
 func parseBasicAuth(header string) (string, string, bool) {

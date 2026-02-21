@@ -16,6 +16,7 @@ type Entry struct {
 	Host         string    `json:"host"`
 	URI          string    `json:"uri,omitempty"`
 	User         string    `json:"user,omitempty"`
+	Error        string    `json:"error,omitempty"`
 	Status       int       `json:"status"`
 	DurationMS   int64     `json:"duration_ms"`
 	BytesRead    int64     `json:"bytes_read"`
@@ -65,7 +66,11 @@ func (l *Logger) Log(e Entry) {
 		if event == "" {
 			event = "-"
 		}
-		fmt.Fprintf(l.w, "%s  %-5s  %-15s  %-7s  %-40s  %-16s  %d  %dms  %d/%d\n",
+		errStr := ""
+		if e.Error != "" {
+			errStr = "  err=" + e.Error
+		}
+		fmt.Fprintf(l.w, "%s  %-5s  %-15s  %-7s  %-40s  %-16s  %d  %dms  %d/%d%s\n",
 			e.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"),
 			event,
 			e.ClientIP,
@@ -76,6 +81,7 @@ func (l *Logger) Log(e Entry) {
 			e.DurationMS,
 			e.BytesRead,
 			e.BytesWritten,
+			errStr,
 		)
 	}
 
