@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>evan-proxy / admin</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>evan-proxy</h1>
+    <a href="#" id="logout">logout</a>
+  </div>
+  <div class="box center">
+    <div class="status" id="status">loading...</div>
+    <button class="btn-toggle" id="toggle" disabled>loading...</button>
+  </div>
+</div>
+<script>
+async function loadStatus() {
+  const resp = await fetch('/api/status');
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  const data = await resp.json();
+  updateUI(data.enabled);
+}
+
+function updateUI(enabled) {
+  const statusEl = document.getElementById('status');
+  const toggleEl = document.getElementById('toggle');
+  if (enabled) {
+    statusEl.innerHTML = '<span class="dot dot-enabled"></span><span class="status-enabled">ENABLED</span>';
+    toggleEl.textContent = 'disable proxy';
+  } else {
+    statusEl.innerHTML = '<span class="dot dot-disabled"></span><span class="status-disabled">DISABLED</span>';
+    toggleEl.textContent = 'enable proxy';
+  }
+  toggleEl.disabled = false;
+}
+
+document.getElementById('toggle').addEventListener('click', async () => {
+  const btn = document.getElementById('toggle');
+  btn.disabled = true;
+  const resp = await fetch('/api/proxy/toggle', {method: 'POST'});
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  const data = await resp.json();
+  updateUI(data.enabled);
+});
+
+document.getElementById('logout').addEventListener('click', async (e) => {
+  e.preventDefault();
+  await fetch('/api/logout', {method: 'POST'});
+  window.location.href = '/login';
+});
+
+loadStatus();
+</script>
+</body>
+</html>

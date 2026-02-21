@@ -1,0 +1,73 @@
+package admin
+
+import (
+	"embed"
+	"io/fs"
+	"net/http"
+	"time"
+
+	"evan-proxy/pkg/auth"
+)
+
+//go:embed static/*
+var staticFS embed.FS
+
+// Server is the admin HTTP handler.
+type Server struct {
+	mux *http.ServeMux
+}
+
+func NewServer(adminAuth *auth.AdminAuth, state *ProxyState) *Server {
+	sessions := NewSessionStore(1 * time.Hour)
+	a := &api{
+		auth:     adminAuth,
+		state:    state,
+		sessions: sessions,
+	}
+
+	mux := http.NewServeMux()
+
+	// Static files (CSS, fonts)
+	staticSub, _ := fs.Sub(staticFS, "static")
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+
+	// API routes
+	mux.HandleFunc("/api/login", a.handleLogin)
+	mux.HandleFunc("/api/logout", a.handleLogout)
+	mux.HandleFunc("/api/status", a.requireSession(a.handleStatus))
+	mux.HandleFunc("/api/proxy/toggle", a.requireSession(a.handleToggle))
+
+	// Pages
+	mux.HandleFunc("/login", serveFile("static/login.html"))
+	mux.HandleFunc("/", a.requireSessionPage(serveFile("static/index.html")))
+
+	return &Server{mux: mux}
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
+func serveFile(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := staticFS.ReadFile(name)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(data)
+	}
+}
+
+// requireSessionPage redirects to /login if no valid session.
+func (a *api) requireSessionPage(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie(sessionCookie)
+		if err != nil || !a.sessions.Validate(c.Value) {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		next(w, r)
+	}
+}

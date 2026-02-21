@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>evan-proxy / login</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <h1>evan-proxy</h1>
+  <div class="box">
+    <form id="login-form">
+      <div id="error" class="error" style="display:none"></div>
+      <label for="username">username</label>
+      <input type="text" id="username" name="username" autocomplete="username" required>
+      <label for="password">password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+      <button type="submit">login</button>
+    </form>
+  </div>
+</div>
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('error');
+  errEl.style.display = 'none';
+  try {
+    const resp = await fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value
+      })
+    });
+    if (resp.ok) {
+      window.location.href = '/';
+    } else {
+      errEl.textContent = 'invalid credentials';
+      errEl.style.display = 'block';
+    }
+  } catch {
+    errEl.textContent = 'connection error';
+    errEl.style.display = 'block';
+  }
+});
+</script>
+</body>
+</html>

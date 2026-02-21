@@ -1,0 +1,118 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+)
+
+type Config struct {
+	// Proxy user accounts file (JSON)
+	ProxyUsersFile string
+
+	// Listeners
+	ListenPlain string
+	ListenTLS   string
+	AdminListen string
+
+	// TLS
+	TLSCert string
+	TLSKey  string
+
+	// Admin credentials
+	AdminUser     string
+	AdminPassword string // bcrypt hash
+
+	// DNS
+	DNSServer string // e.g. "1.1.1.1:53", empty = system default
+
+	// Timeouts
+	AuthRetryTimeout   time.Duration
+	ConnectDialTimeout time.Duration
+	IdleTimeout        time.Duration
+	HTTPTimeout        time.Duration
+
+	// Rate limiting
+	AuthFailRateLimit int
+	AuthFailWindow    time.Duration
+
+	// Logging
+	LogFormat string // "json" or "human"
+}
+
+func Load() (*Config, error) {
+	cfg := &Config{
+		ProxyUsersFile:     envOr("PROXY_USERS_FILE", "/etc/evan-proxy/users.json"),
+		ListenPlain:        envOr("LISTEN_PLAIN", ":8080"),
+		ListenTLS:          envOr("LISTEN_TLS", ":443"),
+		AdminListen:        envOr("ADMIN_LISTEN", ":9090"),
+		TLSCert:            os.Getenv("TLS_CERT"),
+		TLSKey:             os.Getenv("TLS_KEY"),
+		AdminUser:          os.Getenv("ADMIN_USER"),
+		AdminPassword:      os.Getenv("ADMIN_PASSWORD"),
+		DNSServer:          os.Getenv("DNS_SERVER"),
+		AuthRetryTimeout:   envDuration("AUTH_RETRY_TIMEOUT", 30*time.Second),
+		ConnectDialTimeout: envDuration("CONNECT_DIAL_TIMEOUT", 10*time.Second),
+		IdleTimeout:        envDuration("IDLE_TIMEOUT", 300*time.Second),
+		HTTPTimeout:        envDuration("HTTP_TIMEOUT", 30*time.Second),
+		AuthFailRateLimit:  envInt("AUTH_FAIL_RATE_LIMIT", 5),
+		AuthFailWindow:     envDuration("AUTH_FAIL_WINDOW", 60*time.Second),
+		LogFormat:          envOr("LOG_FORMAT", "human"),
+	}
+
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func (c *Config) validate() error {
+	if c.ProxyUsersFile == "" {
+		return fmt.Errorf("PROXY_USERS_FILE must not be empty")
+	}
+	if c.AdminUser == "" {
+		return fmt.Errorf("ADMIN_USER is required")
+	}
+	if c.AdminPassword == "" {
+		return fmt.Errorf("ADMIN_PASSWORD is required (bcrypt hash)")
+	}
+	if (c.TLSCert == "") != (c.TLSKey == "") {
+		return fmt.Errorf("TLS_CERT and TLS_KEY must both be set or both empty")
+	}
+	if c.LogFormat != "json" && c.LogFormat != "human" {
+		return fmt.Errorf("LOG_FORMAT must be 'json' or 'human', got %q", c.LogFormat)
+	}
+	return nil
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return fallback
+	}
+	return d
+}
+
+func envInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
