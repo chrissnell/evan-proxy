@@ -11,7 +11,9 @@ RUN apk add --no-cache ca-certificates \
     && rm -rf /var/cache/apk/* /sbin/apk /etc/apk /lib/apk /usr/share/apk \
     && addgroup -g 10001 -S proxy \
     && adduser -u 10001 -S -G proxy -H -s /sbin/nologin proxy \
-    && rm -rf /tmp/* /var/tmp/*
+    && rm -rf /tmp/* /var/tmp/* \
+    && mkdir -p /data/evan-proxy \
+    && chown 10001:10001 /data/evan-proxy
 USER 10001:10001
 COPY --from=build /evan-proxy /evan-proxy
 ENTRYPOINT ["/evan-proxy"]

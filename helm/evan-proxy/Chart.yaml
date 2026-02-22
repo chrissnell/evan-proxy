@@ -1,0 +1,6 @@
+apiVersion: v2
+name: evan-proxy
+description: Forward proxy with iOS-compatible 407 auth flow
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

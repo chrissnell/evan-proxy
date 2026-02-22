@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "evan-proxy.fullname" . }}
+  labels:
+    {{- include "evan-proxy.labels" . | nindent 4 }}
+data:
+  LISTEN_PLAIN: {{ .Values.proxy.listenPlain | quote }}
+  LISTEN_TLS: {{ .Values.proxy.listenTLS | quote }}
+  ADMIN_LISTEN: {{ .Values.admin.listen | quote }}
+  LOG_FORMAT: {{ .Values.proxy.logFormat | quote }}
+  IDLE_TIMEOUT: {{ .Values.proxy.idleTimeout | quote }}
+  HTTP_TIMEOUT: {{ .Values.proxy.httpTimeout | quote }}
+  CONNECT_DIAL_TIMEOUT: {{ .Values.proxy.connectDialTimeout | quote }}
+  AUTH_RETRY_TIMEOUT: {{ .Values.proxy.authRetryTimeout | quote }}
+  AUTH_FAIL_RATE_LIMIT: {{ .Values.proxy.authFailRateLimit | quote }}
+  AUTH_FAIL_WINDOW: {{ .Values.proxy.authFailWindow | quote }}
+  {{- if .Values.proxy.dnsServer }}
+  DNS_SERVER: {{ .Values.proxy.dnsServer | quote }}
+  {{- end }}

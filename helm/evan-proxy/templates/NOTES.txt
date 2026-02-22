@@ -1,0 +1,12 @@
+evan-proxy has been deployed.
+
+Proxy (plain): port {{ .Values.service.plainPort }}
+{{- if .Values.tls.enabled }}
+Proxy (TLS):   port {{ .Values.service.tlsPort }}
+{{- end }}
+Admin:          port {{ .Values.service.adminPort }}
+
+To get the external IP:
+  kubectl get svc {{ include "evan-proxy.fullname" . }}
+
+Configure iOS devices with the proxy IP and port {{ .Values.service.plainPort }}.

@@ -18,6 +18,7 @@ import (
 	"evan-proxy/pkg/proxy"
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
+	"evan-proxy/pkg/userdb"
 )
 
 func main() {
@@ -26,10 +27,11 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	users, err := auth.LoadUsers(cfg.ProxyUsersFile)
+	users, err := userdb.Open(cfg.ProxyDBPath, cfg.ProxyUsersFile)
 	if err != nil {
-		log.Fatalf("users: %v", err)
+		log.Fatalf("userdb: %v", err)
 	}
+	defer users.Close()
 
 	adminAuth := auth.NewAdminAuth(cfg.AdminUser, cfg.AdminPassword)
 	a := acl.AllowAll{}
@@ -41,7 +43,7 @@ func main() {
 
 	counter := stats.NewTrafficCounter(collector)
 	proxyHandler := proxy.New(cfg, users, a, limiter, logger, counter, state)
-	adminServer := admin.NewServer(adminAuth, state, collector)
+	adminServer := admin.NewServer(adminAuth, state, collector, users)
 
 	// Plain proxy listener
 	plainSrv := &http.Server{

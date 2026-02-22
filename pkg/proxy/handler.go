@@ -11,18 +11,22 @@ import (
 
 	"evan-proxy/pkg/acl"
 	"evan-proxy/pkg/admin"
-	"evan-proxy/pkg/auth"
 	"evan-proxy/pkg/config"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
 )
 
+// UserChecker validates proxy authentication credentials.
+type UserChecker interface {
+	Check(proxyAuthHeader string) (string, error)
+}
+
 // ErrDNSBlocked is returned when DNS resolves to a loopback or null address.
 var ErrDNSBlocked = errors.New("dns blocked")
 
 type Handler struct {
-	users     *auth.UserStore
+	users     UserChecker
 	acl       acl.ACL
 	limiter   *ratelimit.Limiter
 	logger    *logging.Logger
@@ -45,7 +49,7 @@ func isDNSBlocked(ip net.IP) bool {
 	return ip.IsLoopback() || ip.Equal(net.IPv4zero) || loopbackNet.Contains(ip)
 }
 
-func New(cfg *config.Config, users *auth.UserStore, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, state *admin.ProxyState) *Handler {
+func New(cfg *config.Config, users UserChecker, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, state *admin.ProxyState) *Handler {
 	dialer := &net.Dialer{
 		Timeout: cfg.ConnectDialTimeout,
 	}

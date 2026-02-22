@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "evan-proxy.fullname" . }}
+  labels:
+    {{- include "evan-proxy.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "evan-proxy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "evan-proxy.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: evan-proxy
+          image: "{{ .Values.image.repository }}:{{ include "evan-proxy.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "evan-proxy.fullname" . }}
+          env:
+            - name: PROXY_DB_PATH
+              value: /data/evan-proxy/users.db
+            - name: PROXY_USERS_FILE
+              value: /etc/evan-proxy/users.json
+            - name: ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "evan-proxy.secretName" . }}
+                  key: ADMIN_USER
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "evan-proxy.secretName" . }}
+                  key: ADMIN_PASSWORD
+            {{- if .Values.tls.enabled }}
+            - name: TLS_CERT
+              value: /etc/evan-proxy/tls/tls.crt
+            - name: TLS_KEY
+              value: /etc/evan-proxy/tls/tls.key
+            {{- end }}
+          ports:
+            - name: proxy-plain
+              containerPort: 8080
+              protocol: TCP
+            {{- if .Values.tls.enabled }}
+            - name: proxy-tls
+              containerPort: 443
+              protocol: TCP
+            {{- end }}
+            - name: admin
+              containerPort: 9090
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: proxy-plain
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: proxy-plain
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data/evan-proxy
+            - name: seed
+              mountPath: /etc/evan-proxy
+              readOnly: true
+            {{- if .Values.tls.enabled }}
+            - name: tls
+              mountPath: /etc/evan-proxy/tls
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "evan-proxy.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: seed
+          secret:
+            secretName: {{ include "evan-proxy.secretName" . }}
+            defaultMode: 0400
+            items:
+              - key: users.json
+                path: users.json
+        {{- if .Values.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ include "evan-proxy.tlsSecretName" . }}
+            defaultMode: 0400
+        {{- end }}

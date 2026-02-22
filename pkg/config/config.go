@@ -8,7 +8,10 @@ import (
 )
 
 type Config struct {
-	// Proxy user accounts file (JSON)
+	// Proxy user database (SQLite)
+	ProxyDBPath string
+
+	// Optional JSON users file for initial seeding
 	ProxyUsersFile string
 
 	// Listeners
@@ -43,7 +46,8 @@ type Config struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		ProxyUsersFile:     envOr("PROXY_USERS_FILE", "/etc/evan-proxy/users.json"),
+		ProxyDBPath:        envOr("PROXY_DB_PATH", "/data/evan-proxy/users.db"),
+		ProxyUsersFile:     os.Getenv("PROXY_USERS_FILE"),
 		ListenPlain:        envOr("LISTEN_PLAIN", ":8080"),
 		ListenTLS:          envOr("LISTEN_TLS", ":443"),
 		AdminListen:        envOr("ADMIN_LISTEN", ":9090"),
@@ -68,8 +72,8 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) validate() error {
-	if c.ProxyUsersFile == "" {
-		return fmt.Errorf("PROXY_USERS_FILE must not be empty")
+	if c.ProxyDBPath == "" {
+		return fmt.Errorf("PROXY_DB_PATH must not be empty")
 	}
 	if c.AdminUser == "" {
 		return fmt.Errorf("ADMIN_USER is required")

@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,22 +16,24 @@ import (
 
 	"evan-proxy/pkg/acl"
 	"evan-proxy/pkg/admin"
-	"evan-proxy/pkg/auth"
 	"evan-proxy/pkg/config"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
+	"evan-proxy/pkg/userdb"
 )
 
 func setupProxy(t *testing.T) (*Handler, *admin.ProxyState) {
 	t.Helper()
 
 	dir := t.TempDir()
-	usersPath := filepath.Join(dir, "users.json")
-	os.WriteFile(usersPath, []byte(`{"users":[{"username":"alice","password":"secret"}]}`), 0600)
-
-	users, err := auth.LoadUsers(usersPath)
+	dbPath := filepath.Join(dir, "users.db")
+	users, err := userdb.Open(dbPath, "")
 	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { users.Close() })
+	if err := users.Add("alice", "secret"); err != nil {
 		t.Fatal(err)
 	}
 

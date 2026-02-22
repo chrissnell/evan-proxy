@@ -8,6 +8,7 @@ import (
 
 	"evan-proxy/pkg/auth"
 	"evan-proxy/pkg/stats"
+	"evan-proxy/pkg/userdb"
 )
 
 //go:embed static/*
@@ -18,13 +19,14 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Collector) *Server {
+func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Collector, users *userdb.DB) *Server {
 	sessions := NewSessionStore(1 * time.Hour)
 	a := &api{
 		auth:     adminAuth,
 		state:    state,
 		sessions: sessions,
 		stats:    collector,
+		users:    users,
 	}
 
 	mux := http.NewServeMux()
@@ -42,6 +44,8 @@ func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Co
 	mux.HandleFunc("/api/stats/top-blocked", a.requireSession(a.handleTopBlocked))
 	mux.HandleFunc("/api/stats/traffic", a.requireSession(a.handleTraffic))
 	mux.HandleFunc("/api/logs", a.requireSession(a.handleLogs))
+	mux.HandleFunc("/api/users", a.requireSession(a.handleUsers))
+	mux.HandleFunc("/api/users/password", a.requireSession(a.handleChangePassword))
 
 	// Pages
 	mux.HandleFunc("/login", serveFile("static/login.html"))

@@ -21,6 +21,22 @@
     <button class="btn-toggle" id="toggle" disabled>loading...</button>
   </div>
 
+  <div class="box">
+    <h2>proxy users</h2>
+    <div id="users-error" class="error" style="display:none"></div>
+    <table class="user-table" id="user-table">
+      <thead><tr><th>username</th><th>created</th><th></th></tr></thead>
+      <tbody id="user-tbody">
+        <tr><td colspan="3" class="empty">loading...</td></tr>
+      </tbody>
+    </table>
+    <div class="user-add-form">
+      <input type="text" id="new-username" placeholder="username">
+      <input type="password" id="new-password" placeholder="password">
+      <button id="add-user-btn">add user</button>
+    </div>
+  </div>
+
   <div class="grid-2">
     <div class="box">
       <h2>top sites &middot; 1h</h2>
@@ -142,6 +158,84 @@ document.getElementById('logout').addEventListener('click', async (e) => {
 });
 
 loadStatus();
+
+// --- Proxy Users ---
+async function refreshUsers() {
+  try {
+    var resp = await fetch('/api/users');
+    if (resp.status === 401) { window.location.href = '/login'; return; }
+    var users = await resp.json();
+    renderUsers(users);
+  } catch (e) { /* retry next cycle */ }
+}
+
+function renderUsers(users) {
+  var tbody = document.getElementById('user-tbody');
+  if (!users || users.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty">no users</td></tr>';
+    return;
+  }
+  tbody.innerHTML = users.map(function(u) {
+    var created = u.created_at ? u.created_at.substring(0, 10) : '';
+    return '<tr>' +
+      '<td>' + escHtml(u.username) + '</td>' +
+      '<td class="dim">' + escHtml(created) + '</td>' +
+      '<td class="user-actions">' +
+        '<button class="btn-sm" onclick="changePassword(\'' + escAttr(u.username) + '\')">password</button>' +
+        '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escAttr(u.username) + '\')">delete</button>' +
+      '</td></tr>';
+  }).join('');
+}
+
+function showUsersError(msg) {
+  var el = document.getElementById('users-error');
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
+}
+
+document.getElementById('add-user-btn').addEventListener('click', async function() {
+  var username = document.getElementById('new-username').value.trim();
+  var password = document.getElementById('new-password').value;
+  showUsersError('');
+  if (!username || !password) { showUsersError('username and password required'); return; }
+
+  var resp = await fetch('/api/users', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, password: password})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (resp.status === 409) { showUsersError('user already exists'); return; }
+  if (!resp.ok) { showUsersError('failed to add user'); return; }
+
+  document.getElementById('new-username').value = '';
+  document.getElementById('new-password').value = '';
+  refreshUsers();
+});
+
+async function deleteUser(username) {
+  if (!confirm('Delete user "' + username + '"?')) return;
+  showUsersError('');
+  var resp = await fetch('/api/users?username=' + encodeURIComponent(username), {method: 'DELETE'});
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showUsersError('failed to delete user'); return; }
+  refreshUsers();
+}
+
+async function changePassword(username) {
+  var newPass = prompt('New password for "' + username + '":');
+  if (!newPass) return;
+  showUsersError('');
+  var resp = await fetch('/api/users/password', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, password: newPass})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showUsersError('failed to change password'); return; }
+}
+
+refreshUsers();
 
 // --- Top Sites & Blocked ---
 function renderList(id, items) {
@@ -302,6 +396,10 @@ function escHtml(s) {
   var d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+function escAttr(s) {
+  return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 </script>
 </body>
