@@ -56,10 +56,13 @@ func (ss *SessionStore) Validate(token string) bool {
 	if !ok {
 		return false
 	}
-	if time.Now().After(s.expiresAt) {
+	now := time.Now()
+	if now.After(s.expiresAt) {
 		delete(ss.sessions, token)
 		return false
 	}
+	// Sliding expiration: renew on each valid access
+	s.expiresAt = now.Add(ss.ttl)
 	return true
 }
 

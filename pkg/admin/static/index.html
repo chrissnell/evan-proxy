@@ -281,8 +281,10 @@ function drawGraph(buckets) {
 
   if (!buckets || buckets.length === 0) {
     ctx.fillStyle = tc.fgDim;
-    ctx.font = '11px Inconsolata';
-    ctx.fillText('no traffic data', w / 2 - 40, h / 2);
+    ctx.font = '11px Inconsolata, Courier New, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('no traffic data', w / 2, h / 2);
+    ctx.textAlign = 'left';
     return;
   }
 
@@ -353,6 +355,7 @@ async function refreshTraffic() {
 }
 
 setInterval(refreshTraffic, 10000);
+document.fonts.ready.then(refreshTraffic);
 refreshTraffic();
 
 // --- Log Tail (SSE) ---
@@ -362,7 +365,8 @@ function startLogTail() {
 
   es.onmessage = function(ev) {
     var e = JSON.parse(ev.data);
-    var ts = (e.ts || '').substring(11, 23);
+    var d = e.ts ? new Date(e.ts) : null;
+    var ts = d ? d.toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3}) : '';
     var user = (e.user || '-').padEnd(12);
     var event = (e.event || '-').padEnd(9);
     var method = (e.method || '').padEnd(7);
