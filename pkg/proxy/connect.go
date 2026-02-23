@@ -57,6 +57,16 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	hadCredentials := r.Header.Get("Proxy-Authorization") != ""
 	user, authErr := h.users.Check(r.Header.Get("Proxy-Authorization"))
 
+	// If no credentials provided, check for a recent auth session from this IP.
+	// iOS/macOS often send CONNECT without credentials for subresource requests
+	// and don't retry after the 407 challenge.
+	if authErr != nil && !hadCredentials {
+		if sessionUser := h.checkAuthSession(clientIP); sessionUser != "" {
+			user = sessionUser
+			authErr = nil
+		}
+	}
+
 	if authErr != nil {
 		// Send 407 challenge — keep connection alive for iOS retry
 		conn.Write([]byte(
@@ -71,9 +81,6 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		conn.SetReadDeadline(time.Now().Add(h.cfg.AuthRetryTimeout))
 		retry, err := http.ReadRequest(bufrw.Reader)
 		if err != nil {
-			// Only count as failure if credentials were provided but wrong.
-			// macOS/iOS may close this connection and retry with credentials
-			// on a new connection — that's normal, not a brute force attempt.
 			if hadCredentials {
 				h.limiter.RecordFailure(clientIP)
 			}
@@ -99,6 +106,9 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	// Cache successful auth for this IP
+	h.recordAuthSuccess(clientIP, user)
 
 	// ACL check
 	if !h.acl.Allow(host) {

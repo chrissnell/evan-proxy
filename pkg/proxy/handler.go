@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"evan-proxy/pkg/acl"
@@ -25,6 +26,12 @@ type UserChecker interface {
 // ErrDNSBlocked is returned when DNS resolves to a loopback or null address.
 var ErrDNSBlocked = errors.New("dns blocked")
 
+// authSession tracks a recently authenticated client IP.
+type authSession struct {
+	user    string
+	expires time.Time
+}
+
 type Handler struct {
 	users     UserChecker
 	acl       acl.ACL
@@ -35,6 +42,12 @@ type Handler struct {
 	dial      func(ctx context.Context, network, address string) (net.Conn, error)
 	state     *admin.ProxyState
 	cfg       *config.Config
+
+	// IP-based auth cache: after a client authenticates, allow subsequent
+	// requests from the same IP without re-challenging. This handles
+	// iOS/macOS which may not retry CONNECT auth for subresource requests.
+	authMu       sync.RWMutex
+	authSessions map[string]authSession
 }
 
 // loopbackNet covers 127.0.0.0/8 used by DNS-blocking resolvers.
@@ -101,16 +114,37 @@ func New(cfg *config.Config, users UserChecker, a acl.ACL, rl *ratelimit.Limiter
 	}
 
 	return &Handler{
-		users:     users,
-		acl:       a,
-		limiter:   rl,
-		logger:    lg,
-		counter:   tc,
-		transport: transport,
-		dial:      dialWithBlockCheck,
-		state:     state,
-		cfg:       cfg,
+		users:        users,
+		acl:          a,
+		limiter:      rl,
+		logger:       lg,
+		counter:      tc,
+		transport:    transport,
+		dial:         dialWithBlockCheck,
+		state:        state,
+		cfg:          cfg,
+		authSessions: make(map[string]authSession),
 	}
+}
+
+const authSessionTTL = 5 * time.Minute
+
+// recordAuthSuccess caches a successful auth for an IP.
+func (h *Handler) recordAuthSuccess(ip, user string) {
+	h.authMu.Lock()
+	h.authSessions[ip] = authSession{user: user, expires: time.Now().Add(authSessionTTL)}
+	h.authMu.Unlock()
+}
+
+// checkAuthSession returns the cached user for an IP, or "" if none.
+func (h *Handler) checkAuthSession(ip string) string {
+	h.authMu.RLock()
+	s, ok := h.authSessions[ip]
+	h.authMu.RUnlock()
+	if ok && time.Now().Before(s.expires) {
+		return s.user
+	}
+	return ""
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

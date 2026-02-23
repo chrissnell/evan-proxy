@@ -67,6 +67,8 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.recordAuthSuccess(clientIP, user)
+
 	// ACL check
 	if !h.acl.Allow(host) {
 		w.Header().Set("Content-Length", "0")
