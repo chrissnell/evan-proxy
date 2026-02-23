@@ -363,13 +363,14 @@ function startLogTail() {
   es.onmessage = function(ev) {
     var e = JSON.parse(ev.data);
     var ts = (e.ts || '').substring(11, 23);
+    var user = (e.user || '-').padEnd(12);
     var event = (e.event || '-').padEnd(9);
     var method = (e.method || '').padEnd(7);
     var host = (e.host || '').substring(0, 35).padEnd(35);
     var status = String(e.status || 0);
     var bytes = (e.bytes_read || 0) + '/' + (e.bytes_written || 0);
 
-    var line = ts + '  ' + event + '  ' + method + '  ' + host + '  ' + status + '  ' + bytes;
+    var line = ts + '  ' + user + '  ' + event + '  ' + method + '  ' + host + '  ' + status + '  ' + bytes;
 
     var span = document.createElement('span');
     if (e.event === 'dns-block') span.className = 'log-block';
