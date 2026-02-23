@@ -25,8 +25,8 @@ func New() *Metrics {
 	m := &Metrics{
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "evanproxy_requests_total",
-			Help: "Total proxy requests by method and status code.",
-		}, []string{"method", "status_code"}),
+			Help: "Total proxy requests by method, status code, and user.",
+		}, []string{"method", "status_code", "user"}),
 
 		blocked: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "evanproxy_blocked_total",
@@ -90,7 +90,11 @@ func (m *Metrics) Observe(e logging.Entry) {
 	}
 
 	// Request counter
-	m.requests.WithLabelValues(e.Method, strconv.Itoa(e.Status)).Inc()
+	user := e.User
+	if user == "" {
+		user = "anonymous"
+	}
+	m.requests.WithLabelValues(e.Method, strconv.Itoa(e.Status), user).Inc()
 
 	// Blocked request classification
 	switch {
