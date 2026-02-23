@@ -49,7 +49,11 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 	// Auth check
 	user, authErr := h.users.Check(r.Header.Get("Proxy-Authorization"))
 	if authErr != nil {
-		h.limiter.RecordFailure(clientIP)
+		// Only count as a rate-limit failure when credentials were provided
+		// but wrong. Missing credentials is the normal first step of proxy auth.
+		if r.Header.Get("Proxy-Authorization") != "" {
+			h.limiter.RecordFailure(clientIP)
+		}
 		w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
 		w.Header().Set("Proxy-Connection", "keep-alive")
 		w.Header().Set("Content-Length", "0")

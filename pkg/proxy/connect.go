@@ -31,7 +31,7 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		conn.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n"))
+		conn.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"proxy\"\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n"))
 		conn.Close()
 		h.logger.Log(logging.Entry{
 			Timestamp: start, ClientIP: clientIP, Method: "CONNECT",
@@ -54,6 +54,7 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	// Check auth on initial request
+	hadCredentials := r.Header.Get("Proxy-Authorization") != ""
 	user, authErr := h.users.Check(r.Header.Get("Proxy-Authorization"))
 
 	if authErr != nil {
@@ -70,7 +71,12 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		conn.SetReadDeadline(time.Now().Add(h.cfg.AuthRetryTimeout))
 		retry, err := http.ReadRequest(bufrw.Reader)
 		if err != nil {
-			h.limiter.RecordFailure(clientIP)
+			// Only count as failure if credentials were provided but wrong.
+			// macOS/iOS may close this connection and retry with credentials
+			// on a new connection — that's normal, not a brute force attempt.
+			if hadCredentials {
+				h.limiter.RecordFailure(clientIP)
+			}
 			h.logger.Log(logging.Entry{
 				Timestamp: start, ClientIP: clientIP, Method: "CONNECT",
 				Host: host, Status: 407, Error: authErr.Error() + "; retry read failed",
