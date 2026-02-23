@@ -1,6 +1,4 @@
 {{- if .Values.persistence.enabled }}
-{{- $existing := (lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-data" (include "evan-proxy.fullname" .))) }}
-{{- if not $existing }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -13,8 +11,7 @@ spec:
   resources:
     requests:
       storage: {{ .Values.persistence.size }}
-  {{- if .Values.persistence.storageClass }}
-  storageClassName: {{ .Values.persistence.storageClass }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . }}
   {{- end }}
-{{- end }}
 {{- end }}
