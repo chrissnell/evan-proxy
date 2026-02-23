@@ -150,7 +150,7 @@ func (a *api) handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *api) handleListUsers(w http.ResponseWriter, r *http.Request) {
+func (a *api) handleListUsers(w http.ResponseWriter, _ *http.Request) {
 	users, err := a.users.List()
 	if err != nil {
 		log.Printf("list users: %v", err)
