@@ -1,0 +1,99 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/chrissnell/evan-proxy
+  tag: "0.1.5"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: ghcr-secret
+
+# Proxy configuration
+proxy:
+  listenPlain: ":8080"
+  listenTLS: ":443"
+  logFormat: "human"
+  idleTimeout: "300s"
+  httpTimeout: "30s"
+  connectDialTimeout: "10s"
+  authRetryTimeout: "5s"
+  authFailRateLimit: 5
+  authFailWindow: "60s"
+  dnsServer: ""  # e.g. "1.1.1.1:53", empty = system default
+
+# Persistent storage for SQLite user database
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""  # empty = default StorageClass
+
+# Proxy users seed (imported into SQLite on first run if DB is empty)
+proxyUsers:
+  - username: "proxy"
+    password: "CHANGEME"
+
+# Admin interface
+admin:
+  listen: ":9090"
+  user: "admin"
+  # bcrypt hash of admin password
+  # generate with: htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
+  passwordHash: "$2y$10$CHANGEME"
+
+# Use an existing secret instead of creating one
+# Secret must contain: users.json, ADMIN_USER, ADMIN_PASSWORD
+existingSecret: ""
+
+# TLS configuration
+tls:
+  enabled: false
+  # Use cert-manager to provision certs
+  certManager:
+    enabled: false
+    issuer: letsencrypt-prod
+    issuerKind: ClusterIssuer
+  # Or reference an existing TLS secret
+  existingSecret: ""
+  # Domain for cert-manager Certificate resource
+  domain: ""
+
+# Service
+service:
+  type: LoadBalancer
+  # Set a specific IP from the MetalLB pool, or leave empty for auto-assign
+  loadBalancerIP: ""
+  annotations: {}
+  plainPort: 8080
+  tlsPort: 443
+  adminPort: 9090
+
+# Resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 1000m
+    memory: 256Mi
+
+# Network policy (requires a CNI that supports NetworkPolicy)
+networkPolicy:
+  enabled: true
+  # Allow CONNECT tunnels to reach any port (not just 80/443)
+  allowAllEgress: true
+
+# Ingress (e.g. for admin UI via Cloudflare tunnel)
+ingress:
+  enabled: false
+  className: cloudflare-tunnel
+  annotations: {}
+  hosts:
+    - host: proxy.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+          servicePort: 9090
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

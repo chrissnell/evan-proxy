@@ -56,7 +56,7 @@ func Load() (*Config, error) {
 		AdminUser:          os.Getenv("ADMIN_USER"),
 		AdminPassword:      os.Getenv("ADMIN_PASSWORD"),
 		DNSServer:          os.Getenv("DNS_SERVER"),
-		AuthRetryTimeout:   envDuration("AUTH_RETRY_TIMEOUT", 30*time.Second),
+		AuthRetryTimeout:   envDuration("AUTH_RETRY_TIMEOUT", 5*time.Second),
 		ConnectDialTimeout: envDuration("CONNECT_DIAL_TIMEOUT", 10*time.Second),
 		IdleTimeout:        envDuration("IDLE_TIMEOUT", 300*time.Second),
 		HTTPTimeout:        envDuration("HTTP_TIMEOUT", 30*time.Second),

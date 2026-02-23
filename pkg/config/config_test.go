@@ -40,8 +40,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.LogFormat != "human" {
 		t.Errorf("LogFormat = %q, want human", cfg.LogFormat)
 	}
-	if cfg.AuthRetryTimeout != 30*time.Second {
-		t.Errorf("AuthRetryTimeout = %v, want 30s", cfg.AuthRetryTimeout)
+	if cfg.AuthRetryTimeout != 5*time.Second {
+		t.Errorf("AuthRetryTimeout = %v, want 5s", cfg.AuthRetryTimeout)
 	}
 }
 
