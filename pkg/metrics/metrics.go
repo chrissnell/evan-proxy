@@ -78,6 +78,16 @@ func (m *Metrics) Handler() http.Handler {
 	return promhttp.Handler()
 }
 
+// ObserveLiveBytes updates throughput counters from live traffic deltas.
+func (m *Metrics) ObserveLiveBytes(read, written int64) {
+	if read > 0 {
+		m.bytesRead.Add(float64(read))
+	}
+	if written > 0 {
+		m.bytesWritten.Add(float64(written))
+	}
+}
+
 // Observe implements the logger observer pattern. Must not block.
 func (m *Metrics) Observe(e logging.Entry) {
 	// Track tunnel open/close
@@ -116,11 +126,14 @@ func (m *Metrics) Observe(e logging.Entry) {
 		m.duration.WithLabelValues(e.Method).Observe(float64(e.DurationMS) / 1000.0)
 	}
 
-	// Throughput
-	if e.BytesRead > 0 {
-		m.bytesRead.Add(float64(e.BytesRead))
-	}
-	if e.BytesWritten > 0 {
-		m.bytesWritten.Add(float64(e.BytesWritten))
+	// Throughput for non-tunnel requests (HTTP forwarding).
+	// CONNECT tunnel bytes are tracked via ObserveLiveBytes.
+	if e.Method != "CONNECT" {
+		if e.BytesRead > 0 {
+			m.bytesRead.Add(float64(e.BytesRead))
+		}
+		if e.BytesWritten > 0 {
+			m.bytesWritten.Add(float64(e.BytesWritten))
+		}
 	}
 }

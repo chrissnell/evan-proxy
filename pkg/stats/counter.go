@@ -20,8 +20,9 @@ type TrafficDelta struct {
 // TrafficCounter collects live byte counts from counting writers
 // and drains them into a collector via a buffered channel.
 type TrafficCounter struct {
-	ch     chan TrafficDelta
-	stopCh chan struct{}
+	ch        chan TrafficDelta
+	stopCh    chan struct{}
+	observers []func(read, written int64)
 }
 
 func NewTrafficCounter(c *Collector) *TrafficCounter {
@@ -31,6 +32,11 @@ func NewTrafficCounter(c *Collector) *TrafficCounter {
 	}
 	go tc.drain(c)
 	return tc
+}
+
+// AddObserver registers a callback invoked on each live byte delta.
+func (tc *TrafficCounter) AddObserver(fn func(read, written int64)) {
+	tc.observers = append(tc.observers, fn)
 }
 
 func (tc *TrafficCounter) Stop() {
@@ -54,11 +60,17 @@ func (tc *TrafficCounter) drain(c *Collector) {
 		select {
 		case d := <-tc.ch:
 			c.AddLiveBytes(d.Read, d.Written)
+			for _, fn := range tc.observers {
+				fn(d.Read, d.Written)
+			}
 		case <-tc.stopCh:
 			for {
 				select {
 				case d := <-tc.ch:
 					c.AddLiveBytes(d.Read, d.Written)
+					for _, fn := range tc.observers {
+						fn(d.Read, d.Written)
+					}
 				default:
 					return
 				}
