@@ -15,6 +15,7 @@ import (
 	"evan-proxy/pkg/auth"
 	"evan-proxy/pkg/config"
 	"evan-proxy/pkg/logging"
+	"evan-proxy/pkg/metrics"
 	"evan-proxy/pkg/proxy"
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
@@ -41,9 +42,12 @@ func main() {
 	logger.AddObserver(collector.Observe)
 	state := admin.NewProxyState()
 
+	m := metrics.New()
+	logger.AddObserver(m.Observe)
+
 	counter := stats.NewTrafficCounter(collector)
 	proxyHandler := proxy.New(cfg, users, a, limiter, logger, counter, state)
-	adminServer := admin.NewServer(adminAuth, state, collector, users)
+	adminServer := admin.NewServer(adminAuth, state, collector, users, m)
 
 	// Plain proxy listener
 	plainSrv := &http.Server{

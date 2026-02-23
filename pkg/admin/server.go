@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"evan-proxy/pkg/auth"
+	"evan-proxy/pkg/metrics"
 	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
 )
@@ -19,7 +20,7 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Collector, users *userdb.DB) *Server {
+func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Collector, users *userdb.DB, m *metrics.Metrics) *Server {
 	sessions := NewSessionStore(1 * time.Hour)
 	a := &api{
 		auth:     adminAuth,
@@ -46,6 +47,9 @@ func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Co
 	mux.HandleFunc("/api/logs", a.requireSession(a.handleLogs))
 	mux.HandleFunc("/api/users", a.requireSession(a.handleUsers))
 	mux.HandleFunc("/api/users/password", a.requireSession(a.handleChangePassword))
+
+	// Prometheus metrics (no auth — standard for scraping)
+	mux.Handle("/metrics", m.Handler())
 
 	// Pages
 	mux.HandleFunc("/login", serveFile("static/login.html"))
