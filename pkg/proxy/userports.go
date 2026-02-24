@@ -41,11 +41,13 @@ func (h *Handler) StartUserListeners() error {
 
 // startListenerLocked starts a listener for a single port. Caller must hold portMu.
 func (h *Handler) startListenerLocked(port int, username string) {
+	portUser := username // capture for closure
 	srv := &http.Server{
 		Addr:        fmt.Sprintf(":%d", port),
 		IdleTimeout: h.cfg.IdleTimeout,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			h.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), portOwnerKey, portUser)
+			h.ServeHTTP(w, r.WithContext(ctx))
 		}),
 	}
 

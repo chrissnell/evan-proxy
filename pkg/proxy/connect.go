@@ -56,14 +56,21 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	// Check auth on initial request
+	portUser := portOwnerFromCtx(r)
 	hadCredentials := r.Header.Get("Proxy-Authorization") != ""
 	user, authErr := h.users.Check(r.Header.Get("Proxy-Authorization"))
+
+	// If credentials were provided but for the wrong user on this port, reject.
+	if authErr == nil && portUser != "" && user != portUser {
+		authErr = fmt.Errorf("user %q not allowed on this port (owner: %q)", user, portUser)
+		user = ""
+	}
 
 	// If no credentials provided, check for a recent auth session from this IP.
 	// iOS/macOS often send CONNECT without credentials for subresource requests
 	// and don't retry after the 407 challenge.
 	if authErr != nil && !hadCredentials {
-		if sessionUser := h.checkAuthSession(clientIP); sessionUser != "" {
+		if sessionUser := h.checkAuthSession(clientIP, portUser); sessionUser != "" {
 			user = sessionUser
 			authErr = nil
 		}
@@ -97,6 +104,10 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 		host = retry.Host
 		user, authErr = h.users.Check(retry.Header.Get("Proxy-Authorization"))
+		if authErr == nil && portUser != "" && user != portUser {
+			authErr = fmt.Errorf("user %q not allowed on this port (owner: %q)", user, portUser)
+			user = ""
+		}
 		if authErr != nil {
 			h.limiter.RecordFailure(clientIP)
 			conn.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n"))

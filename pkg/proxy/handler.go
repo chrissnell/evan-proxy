@@ -42,6 +42,7 @@ type ctxKey int
 
 const (
 	dnsResolverKey ctxKey = iota
+	portOwnerKey
 )
 
 // authSession tracks a recently authenticated client IP.
@@ -181,20 +182,38 @@ func (h *Handler) ctxWithUserDNS(ctx context.Context, username string) context.C
 
 const authSessionTTL = 5 * time.Minute
 
-// recordAuthSuccess caches a successful auth for an IP.
+// authCacheKey builds the session cache key scoped to the expected port owner.
+func authCacheKey(ip, portUser string) string {
+	if portUser == "" {
+		return ip
+	}
+	return ip + ":" + portUser
+}
+
+// recordAuthSuccess caches a successful auth for an IP, scoped to port owner.
 func (h *Handler) recordAuthSuccess(ip, user string) {
+	key := authCacheKey(ip, user)
 	h.authMu.Lock()
-	h.authSessions[ip] = authSession{user: user, expires: time.Now().Add(authSessionTTL)}
+	h.authSessions[key] = authSession{user: user, expires: time.Now().Add(authSessionTTL)}
 	h.authMu.Unlock()
 }
 
-// checkAuthSession returns the cached user for an IP, or "" if none.
-func (h *Handler) checkAuthSession(ip string) string {
+// checkAuthSession returns the cached user for an IP+portOwner, or "" if none.
+func (h *Handler) checkAuthSession(ip, portUser string) string {
+	key := authCacheKey(ip, portUser)
 	h.authMu.RLock()
-	s, ok := h.authSessions[ip]
+	s, ok := h.authSessions[key]
 	h.authMu.RUnlock()
 	if ok && time.Now().Before(s.expires) {
 		return s.user
+	}
+	return ""
+}
+
+// portOwnerFromCtx returns the expected username for the per-user port, or "".
+func portOwnerFromCtx(r *http.Request) string {
+	if u, ok := r.Context().Value(portOwnerKey).(string); ok {
+		return u
 	}
 	return ""
 }

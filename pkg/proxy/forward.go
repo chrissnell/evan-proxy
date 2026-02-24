@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -47,9 +48,26 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Authenticate the user
+	portUser := portOwnerFromCtx(r)
+	hadCredentials := r.Header.Get("Proxy-Authorization") != ""
 	user, authErr := h.users.Check(r.Header.Get("Proxy-Authorization"))
+
+	// If credentials were provided but for the wrong user on this port, reject.
+	if authErr == nil && portUser != "" && user != portUser {
+		authErr = fmt.Errorf("user %q not allowed on this port (owner: %q)", user, portUser)
+		user = ""
+	}
+
+	// Fall back to IP-based auth session cache (iOS/macOS compatibility).
+	if authErr != nil && !hadCredentials {
+		if sessionUser := h.checkAuthSession(clientIP, portUser); sessionUser != "" {
+			user = sessionUser
+			authErr = nil
+		}
+	}
+
 	if authErr != nil {
-		if r.Header.Get("Proxy-Authorization") != "" {
+		if hadCredentials {
 			h.limiter.RecordFailure(clientIP)
 		}
 		w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
@@ -64,6 +82,9 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Cache successful auth for this IP+user
+	h.recordAuthSuccess(clientIP, user)
 
 	// Attach per-user DNS resolver to context
 	ctx := h.ctxWithUserDNS(r.Context(), user)
