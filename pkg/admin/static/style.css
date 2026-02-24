@@ -410,15 +410,15 @@ button:hover {
   white-space: nowrap;
 }
 
-/* Inline DNS edit */
-.dns-edit-row td {
+/* Inline edit rows (dns, port, password) */
+.inline-edit-row td {
   padding: 0.25rem 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.dns-edit-cell { text-align: right; }
+.inline-edit-cell { text-align: right; }
 
-.dns-edit-form {
+.inline-edit-form {
   display: inline-flex;
   gap: 0.25rem;
   align-items: center;
@@ -449,7 +449,7 @@ button:hover {
   border-color: var(--accent);
 }
 
-.dns-input {
+.inline-input {
   font-family: inherit;
   font-size: 0.72rem;
   border: 1px solid var(--btn-border);
@@ -459,13 +459,31 @@ button:hover {
   border-radius: 2px;
   width: 14em;
   margin: 0;
+  height: 1.6em;
+  line-height: 1;
 }
 
-.dns-input:focus { border-color: var(--accent); outline: none; }
-.dns-input:disabled { opacity: 0.4; }
+.inline-input-short { width: 6em; }
+
+.inline-input:focus { border-color: var(--accent); outline: none; }
+.inline-input:disabled { opacity: 0.4; }
+
+/* Hide number input spinners */
+.inline-input[type="number"]::-webkit-inner-spin-button,
+.inline-input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.inline-input[type="number"] { -moz-appearance: textfield; }
 
 .btn-save { color: var(--accent); border-color: var(--accent); }
 .btn-save:hover { background: var(--accent); color: var(--bg); }
+
+.btn-danger-confirm {
+  color: var(--bg);
+  background: var(--danger);
+  border-color: var(--danger);
+}
 
 .dns-test-ok { color: var(--accent); font-size: 0.85rem; }
 .dns-test-fail { color: var(--danger); font-size: 0.85rem; }

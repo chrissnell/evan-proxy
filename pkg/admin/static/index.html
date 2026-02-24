@@ -165,11 +165,15 @@ async function refreshUsers() {
     var resp = await fetch('/api/users');
     if (resp.status === 401) { window.location.href = '/login'; return; }
     var users = await resp.json();
+    cachedUsers = users;
+    deleteConfirm = null;
     renderUsers(users);
   } catch (e) { /* retry next cycle */ }
 }
 
-var dnsEditUser = null; // track which user's DNS row is open
+var editingUser = null;  // which user has an edit row open
+var editingField = null; // 'dns', 'port', or 'password'
+var deleteConfirm = null; // username pending delete confirmation
 
 function renderUsers(users) {
   var tbody = document.getElementById('user-tbody');
@@ -182,47 +186,106 @@ function renderUsers(users) {
     var created = u.created_at ? u.created_at.substring(0, 10) : '';
     var portLabel = u.port ? '<span>' + u.port + '</span>' : '<span class="dim">none</span>';
     var dnsLabel = u.dns_server ? escHtml(u.dns_protocol + '://' + u.dns_server) : '<span class="dim">default</span>';
+    var esc = escAttr(u.username);
+    var delBtn = deleteConfirm === u.username
+      ? '<button class="btn-sm btn-danger-confirm" onclick="confirmDelete(\'' + esc + '\')">confirm?</button>'
+      : '<button class="btn-sm btn-danger" onclick="startDelete(\'' + esc + '\')">delete</button>';
     rows.push('<tr>' +
       '<td>' + escHtml(u.username) + '</td>' +
       '<td class="dim">' + escHtml(created) + '</td>' +
       '<td>' + portLabel + '</td>' +
       '<td>' + dnsLabel + '</td>' +
       '<td class="user-actions">' +
-        '<button class="btn-sm" onclick="changePort(\'' + escAttr(u.username) + '\',' + (u.port||0) + ')">port</button>' +
-        '<button class="btn-sm" onclick="toggleDNSEdit(\'' + escAttr(u.username) + '\')">dns</button>' +
-        '<button class="btn-sm" onclick="changePassword(\'' + escAttr(u.username) + '\')">password</button>' +
-        '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escAttr(u.username) + '\')">delete</button>' +
+        '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'port\')">port</button>' +
+        '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'dns\')">dns</button>' +
+        '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'password\')">password</button>' +
+        delBtn +
       '</td></tr>');
-    if (dnsEditUser === u.username) {
-      if (!dnsEditProto.hasOwnProperty(u.username)) dnsEditProto[u.username] = u.dns_protocol || '';
-      var proto = dnsEditProto[u.username];
-      var server = u.dns_server || '';
-      var esc = escAttr(u.username);
-      function pbtn(val, label) {
-        var cls = 'btn-sm' + (proto === val ? ' active' : '');
-        return '<button class="' + cls + '" onclick="setDNSProto(\'' + esc + '\',\'' + val + '\')">' + label + '</button>';
-      }
-      rows.push('<tr class="dns-edit-row">' +
-        '<td></td><td></td><td></td>' +
-        '<td class="dns-edit-cell" colspan="2">' +
-          '<div class="dns-edit-form">' +
-            '<span class="dns-proto-group">' +
-              pbtn('', 'default') + pbtn('plain', 'plain') + pbtn('tls', 'tls') + pbtn('https', 'https') +
-            '</span>' +
-            '<input type="text" id="dns-server-' + esc + '" class="dns-input"' +
-              ' value="' + escAttr(server) + '"' +
-              ' placeholder="' + dnsPlaceholder(proto) + '"' +
-              (proto === '' ? ' disabled' : '') + '>' +
-            '<button class="btn-sm" onclick="testDNS(\'' + esc + '\')"' +
-              (proto === '' ? ' disabled' : '') + '>test</button>' +
-            '<span id="dns-result-' + esc + '"></span>' +
-            '<button class="btn-sm btn-save" onclick="saveDNS(\'' + esc + '\')">save</button>' +
-            '<button class="btn-sm" onclick="cancelDNSEdit()">cancel</button>' +
-          '</div>' +
-        '</td></tr>');
+    if (editingUser === u.username) {
+      if (editingField === 'dns') rows.push(renderDNSEditRow(u));
+      else if (editingField === 'port') rows.push(renderPortEditRow(u));
+      else if (editingField === 'password') rows.push(renderPasswordEditRow(u));
     }
   });
   tbody.innerHTML = rows.join('');
+}
+
+function toggleEdit(username, field) {
+  deleteConfirm = null;
+  if (editingUser === username && editingField === field) {
+    closeEdit();
+  } else {
+    if (editingField === 'dns' && editingUser) delete dnsEditProto[editingUser];
+    editingUser = username;
+    editingField = field;
+    if (field === 'dns') delete dnsEditProto[username];
+  }
+  refreshUsers();
+}
+
+function closeEdit() {
+  if (editingField === 'dns' && editingUser) delete dnsEditProto[editingUser];
+  editingUser = null;
+  editingField = null;
+  refreshUsers();
+}
+
+function renderDNSEditRow(u) {
+  if (!dnsEditProto.hasOwnProperty(u.username)) dnsEditProto[u.username] = u.dns_protocol || '';
+  var proto = dnsEditProto[u.username];
+  var server = u.dns_server || '';
+  var esc = escAttr(u.username);
+  function pbtn(val, label) {
+    var cls = 'btn-sm' + (proto === val ? ' active' : '');
+    return '<button class="' + cls + '" onclick="setDNSProto(\'' + esc + '\',\'' + val + '\')">' + label + '</button>';
+  }
+  return '<tr class="inline-edit-row">' +
+    '<td></td><td></td><td></td>' +
+    '<td class="inline-edit-cell" colspan="2">' +
+      '<div class="inline-edit-form">' +
+        '<span class="dns-proto-group">' +
+          pbtn('', 'default') + pbtn('plain', 'plain') + pbtn('tls', 'tls') + pbtn('https', 'https') +
+        '</span>' +
+        '<input type="text" id="dns-server-' + esc + '" class="inline-input"' +
+          ' value="' + escAttr(server) + '"' +
+          ' placeholder="' + dnsPlaceholder(proto) + '"' +
+          (proto === '' ? ' disabled' : '') + '>' +
+        '<button class="btn-sm" onclick="testDNS(\'' + esc + '\')"' +
+          (proto === '' ? ' disabled' : '') + '>test</button>' +
+        '<span id="dns-result-' + esc + '"></span>' +
+        '<button class="btn-sm btn-save" onclick="saveDNS(\'' + esc + '\')">save</button>' +
+        '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+      '</div>' +
+    '</td></tr>';
+}
+
+function renderPortEditRow(u) {
+  var esc = escAttr(u.username);
+  return '<tr class="inline-edit-row">' +
+    '<td></td><td></td><td></td>' +
+    '<td class="inline-edit-cell" colspan="2">' +
+      '<div class="inline-edit-form">' +
+        '<input type="number" id="port-input-' + esc + '" class="inline-input inline-input-short"' +
+          ' value="' + (u.port || '') + '" placeholder="8081" min="0" max="65535">' +
+        '<button class="btn-sm btn-save" onclick="savePort(\'' + esc + '\')">save</button>' +
+        '<button class="btn-sm" onclick="clearPort(\'' + esc + '\')">clear</button>' +
+        '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+      '</div>' +
+    '</td></tr>';
+}
+
+function renderPasswordEditRow(u) {
+  var esc = escAttr(u.username);
+  return '<tr class="inline-edit-row">' +
+    '<td></td><td></td><td></td>' +
+    '<td class="inline-edit-cell" colspan="2">' +
+      '<div class="inline-edit-form">' +
+        '<input type="password" id="pw-input-' + esc + '" class="inline-input"' +
+          ' placeholder="new password">' +
+        '<button class="btn-sm btn-save" onclick="savePassword(\'' + esc + '\')">save</button>' +
+        '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+      '</div>' +
+    '</td></tr>';
 }
 
 function dnsPlaceholder(proto) {
@@ -232,29 +295,11 @@ function dnsPlaceholder(proto) {
   return '';
 }
 
-function toggleDNSEdit(username) {
-  if (dnsEditUser === username) {
-    dnsEditUser = null;
-    delete dnsEditProto[username];
-  } else {
-    dnsEditUser = username;
-    delete dnsEditProto[username]; // start from stored value
-  }
-  refreshUsers();
-}
-
-function cancelDNSEdit() {
-  if (dnsEditUser) delete dnsEditProto[dnsEditUser];
-  dnsEditUser = null;
-  refreshUsers();
-}
-
 // dnsEditProto tracks the currently selected protocol per user.
 var dnsEditProto = {};
 
 function setDNSProto(username, proto) {
   dnsEditProto[username] = proto;
-  // Re-render to update active state.
   refreshUsers();
 }
 
@@ -315,8 +360,13 @@ document.getElementById('add-user-btn').addEventListener('click', async function
   refreshUsers();
 });
 
-async function deleteUser(username) {
-  if (!confirm('Delete user "' + username + '"?')) return;
+function startDelete(username) {
+  deleteConfirm = username;
+  renderUsersFromCache();
+}
+
+async function confirmDelete(username) {
+  deleteConfirm = null;
   showUsersError('');
   var resp = await fetch('/api/users?username=' + encodeURIComponent(username), {method: 'DELETE'});
   if (resp.status === 401) { window.location.href = '/login'; return; }
@@ -324,10 +374,15 @@ async function deleteUser(username) {
   refreshUsers();
 }
 
-async function changePort(username, current) {
-  var input = prompt('Dedicated proxy port for "' + username + '" (0 to clear):', current || '');
-  if (input === null) return;
-  var port = parseInt(input, 10);
+// Re-render without fetching (for delete confirm toggle)
+var cachedUsers = null;
+function renderUsersFromCache() {
+  if (cachedUsers) renderUsers(cachedUsers);
+}
+
+async function savePort(username) {
+  var el = document.getElementById('port-input-' + username);
+  var port = parseInt(el.value, 10);
   if (isNaN(port) || port < 0) { showUsersError('invalid port number'); return; }
   showUsersError('');
   var resp = await fetch('/api/users/port', {
@@ -341,12 +396,29 @@ async function changePort(username, current) {
     showUsersError(text || 'failed to update port');
     return;
   }
+  editingUser = null;
+  editingField = null;
   refreshUsers();
 }
 
-async function changePassword(username) {
-  var newPass = prompt('New password for "' + username + '":');
-  if (!newPass) return;
+async function clearPort(username) {
+  showUsersError('');
+  var resp = await fetch('/api/users/port', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, port: 0})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showUsersError('failed to clear port'); return; }
+  editingUser = null;
+  editingField = null;
+  refreshUsers();
+}
+
+async function savePassword(username) {
+  var el = document.getElementById('pw-input-' + username);
+  var newPass = el.value;
+  if (!newPass) { showUsersError('password required'); return; }
   showUsersError('');
   var resp = await fetch('/api/users/password', {
     method: 'PUT',
@@ -355,6 +427,9 @@ async function changePassword(username) {
   });
   if (resp.status === 401) { window.location.href = '/login'; return; }
   if (!resp.ok) { showUsersError('failed to change password'); return; }
+  editingUser = null;
+  editingField = null;
+  refreshUsers();
 }
 
 async function saveDNS(username) {
@@ -372,7 +447,8 @@ async function saveDNS(username) {
   if (resp.status === 401) { window.location.href = '/login'; return; }
   if (!resp.ok) { showUsersError('failed to update DNS config'); return; }
   delete dnsEditProto[username];
-  dnsEditUser = null;
+  editingUser = null;
+  editingField = null;
   refreshUsers();
 }
 

@@ -54,6 +54,13 @@ Production values override file: `~/kube/evan-proxy/values.yaml` (not in repo)
 - Service type is LoadBalancer (MetalLB)
 - Template-only check: `helm template evan-proxy helm/evan-proxy`
 
+## Admin UI Rules
+
+- **NO POPUP DIALOGS** — never use `alert()`, `confirm()`, or `prompt()` in the admin UI. All user interactions must be inline (expand edit rows, toggle buttons, inline inputs, etc.)
+- Edit rows expand below the user row using the `inline-edit-row` / `inline-edit-form` pattern
+- Delete uses a two-click confirm pattern (button changes to "confirm?" on first click)
+- CSS classes: `inline-edit-row`, `inline-edit-cell`, `inline-edit-form`, `inline-input`, `inline-input-short`
+
 ## Key Architecture Notes
 
 - SQLite database at `/data/evan-proxy/users.db` with WAL mode
