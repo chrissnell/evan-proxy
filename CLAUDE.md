@@ -31,7 +31,9 @@ go test ./...  # run all tests directly
 
 ## Release, Deploy, and Test Cycle
 
-When the user says to commit, tag, push, and deploy (or any subset), follow this sequence:
+**ALWAYS commit, tag, push, and deploy after every code change. Do not wait for the user to ask.**
+
+Follow this sequence:
 
 1. **Run tests**: `go test ./... -count=1` — do not proceed if tests fail
 2. **Commit**: stage specific files (not `git add -A`), write a descriptive commit message
