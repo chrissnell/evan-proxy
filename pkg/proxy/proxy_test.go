@@ -57,7 +57,9 @@ func setupProxy(t *testing.T) (*Handler, *admin.ProxyState) {
 	counter := stats.NewTrafficCounter(collector)
 	t.Cleanup(counter.Stop)
 
-	h := New(cfg, users, users, acl.AllowAll{}, limiter, logger, counter, state)
+	cfg.UserPortMin = 8081
+	cfg.UserPortMax = 8090
+	h := New(cfg, users, users, users, acl.AllowAll{}, limiter, logger, counter, state)
 	return h, state
 }
 
@@ -356,6 +358,142 @@ func TestCtxWithUserDNSNilGetter(t *testing.T) {
 	ctx := handler.ctxWithUserDNS(context.Background(), "alice")
 	if ctx.Value(dnsResolverKey) != nil {
 		t.Error("expected no resolver when dnsGetter is nil")
+	}
+}
+
+// TestPerUserPortConnect tests that CONNECT on a per-user port skips auth entirely.
+func TestPerUserPortConnect(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("tunneled"))
+	}))
+	defer target.Close()
+
+	handler, _ := setupProxy(t)
+
+	// Wrap handler with context injection simulating a per-user port listener
+	userHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), proxyUserKey, "alice")
+		handler.ServeHTTP(w, r.WithContext(ctx))
+	})
+	proxySrv := httptest.NewServer(userHandler)
+	defer proxySrv.Close()
+
+	conn, err := net.Dial("tcp", proxySrv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	targetAddr := strings.TrimPrefix(target.URL, "http://")
+
+	// CONNECT without any credentials — should succeed directly
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", targetAddr, targetAddr)
+
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("reading response: %v", err)
+	}
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200 (no auth needed on per-user port), got %d", resp.StatusCode)
+	}
+
+	// Send a request through the tunnel
+	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", targetAddr)
+	tunnelResp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("reading tunneled response: %v", err)
+	}
+	body, _ := io.ReadAll(tunnelResp.Body)
+	tunnelResp.Body.Close()
+
+	if string(body) != "tunneled" {
+		t.Errorf("tunnel body = %q, want 'tunneled'", body)
+	}
+}
+
+// TestPerUserPortForward tests that plain HTTP on a per-user port skips auth.
+func TestPerUserPortForward(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("forwarded-no-auth"))
+	}))
+	defer target.Close()
+
+	handler, _ := setupProxy(t)
+
+	// Simulate per-user port by injecting username in context
+	req := httptest.NewRequest("GET", target.URL+"/path", nil)
+	req = req.WithContext(context.WithValue(req.Context(), proxyUserKey, "alice"))
+	// No Proxy-Authorization header
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200 (no auth needed on per-user port), got %d", w.Code)
+	}
+	if w.Body.String() != "forwarded-no-auth" {
+		t.Errorf("body = %q, want 'forwarded-no-auth'", w.Body.String())
+	}
+}
+
+// TestPerUserPortCorrectAttribution verifies two users on different per-user ports
+// get correctly attributed in logs even from the same client IP.
+func TestPerUserPortCorrectAttribution(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer target.Close()
+
+	handler, _ := setupProxy(t)
+
+	// Add a second user
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "users2.db")
+	_ = dbPath // not needed; alice is already in the handler's DB
+
+	var logBuf bytes.Buffer
+	handler.logger = logging.New(&logBuf, "human")
+
+	// Request as "alice" via per-user port context
+	req1 := httptest.NewRequest("GET", target.URL+"/alice-page", nil)
+	req1 = req1.WithContext(context.WithValue(req1.Context(), proxyUserKey, "alice"))
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, req1)
+	if w1.Code != 200 {
+		t.Fatalf("alice request: expected 200, got %d", w1.Code)
+	}
+
+	// Request as "bob" via per-user port context
+	req2 := httptest.NewRequest("GET", target.URL+"/bob-page", nil)
+	req2 = req2.WithContext(context.WithValue(req2.Context(), proxyUserKey, "bob"))
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+	if w2.Code != 200 {
+		t.Fatalf("bob request: expected 200, got %d", w2.Code)
+	}
+
+	logOut := logBuf.String()
+	if !strings.Contains(logOut, "alice") {
+		t.Error("expected 'alice' in log output")
+	}
+	if !strings.Contains(logOut, "bob") {
+		t.Error("expected 'bob' in log output")
+	}
+}
+
+// TestUserFromCtx tests the context helper for per-user port identification.
+func TestUserFromCtx(t *testing.T) {
+	// No value set
+	if got := userFromCtx(context.Background()); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+
+	// Value set
+	ctx := context.WithValue(context.Background(), proxyUserKey, "evan")
+	if got := userFromCtx(ctx); got != "evan" {
+		t.Errorf("expected 'evan', got %q", got)
 	}
 }
 

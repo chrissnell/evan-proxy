@@ -21,3 +21,5 @@ data:
   {{- if .Values.proxy.dnsProtocol }}
   DNS_PROTOCOL: {{ .Values.proxy.dnsProtocol | quote }}
   {{- end }}
+  USER_PORT_MIN: {{ .Values.proxy.userPortMin | quote }}
+  USER_PORT_MAX: {{ .Values.proxy.userPortMax | quote }}

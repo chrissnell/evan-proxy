@@ -84,6 +84,13 @@ spec:
             - name: admin
               containerPort: 9090
               protocol: TCP
+            {{- $min := .Values.proxy.userPortMin | int }}
+            {{- $max := .Values.proxy.userPortMax | int }}
+            {{- range $p := untilStep $min (add1 $max | int) 1 }}
+            - name: user-{{ $p }}
+              containerPort: {{ $p }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             tcpSocket:
               port: proxy-plain

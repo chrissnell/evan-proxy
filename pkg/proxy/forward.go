@@ -46,28 +46,30 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auth check
-	user, authErr := h.users.Check(r.Header.Get("Proxy-Authorization"))
-	if authErr != nil {
-		// Only count as a rate-limit failure when credentials were provided
-		// but wrong. Missing credentials is the normal first step of proxy auth.
-		if r.Header.Get("Proxy-Authorization") != "" {
-			h.limiter.RecordFailure(clientIP)
-		}
-		w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
-		w.Header().Set("Proxy-Connection", "keep-alive")
-		w.Header().Set("Content-Length", "0")
-		w.WriteHeader(http.StatusProxyAuthRequired)
-		h.logger.Log(logging.Entry{
-			Timestamp: start, ClientIP: clientIP, Method: r.Method,
-			Host: host, URI: r.RequestURI, Status: 407,
-			Error:      authErr.Error(),
-			DurationMS: time.Since(start).Milliseconds(),
-		})
-		return
-	}
+	// Per-user port: user is already identified by the listening port.
+	user := userFromCtx(r.Context())
 
-	h.recordAuthSuccess(clientIP, user)
+	// If not pre-identified, require credentials.
+	if user == "" {
+		var authErr error
+		user, authErr = h.users.Check(r.Header.Get("Proxy-Authorization"))
+		if authErr != nil {
+			if r.Header.Get("Proxy-Authorization") != "" {
+				h.limiter.RecordFailure(clientIP)
+			}
+			w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
+			w.Header().Set("Proxy-Connection", "keep-alive")
+			w.Header().Set("Content-Length", "0")
+			w.WriteHeader(http.StatusProxyAuthRequired)
+			h.logger.Log(logging.Entry{
+				Timestamp: start, ClientIP: clientIP, Method: r.Method,
+				Host: host, URI: r.RequestURI, Status: 407,
+				Error:      authErr.Error(),
+				DurationMS: time.Since(start).Milliseconds(),
+			})
+			return
+		}
+	}
 
 	// Attach per-user DNS resolver to context
 	ctx := h.ctxWithUserDNS(r.Context(), user)

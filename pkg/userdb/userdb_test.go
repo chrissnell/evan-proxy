@@ -419,6 +419,151 @@ func TestDNSCacheLoadedOnOpen(t *testing.T) {
 	}
 }
 
+func TestUpdatePort(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass")
+
+	if err := db.UpdatePort("alice", 8081); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify via List
+	users, _ := db.List()
+	if users[0].Port != 8081 {
+		t.Errorf("expected port 8081, got %d", users[0].Port)
+	}
+}
+
+func TestUpdatePortClear(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass")
+	db.UpdatePort("alice", 8081)
+
+	if err := db.UpdatePort("alice", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	users, _ := db.List()
+	if users[0].Port != 0 {
+		t.Errorf("expected port 0 after clear, got %d", users[0].Port)
+	}
+}
+
+func TestUpdatePortUnknownUser(t *testing.T) {
+	db := openTestDB(t)
+
+	err := db.UpdatePort("nobody", 8081)
+	if !errors.Is(err, ErrUnknownUser) {
+		t.Errorf("expected ErrUnknownUser, got: %v", err)
+	}
+}
+
+func TestListPorts(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass")
+	db.Add("bob", "pass")
+
+	db.UpdatePort("alice", 8081)
+	db.UpdatePort("bob", 8082)
+
+	ports, err := db.ListPorts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ports) != 2 {
+		t.Fatalf("expected 2 port assignments, got %d", len(ports))
+	}
+	if ports[8081] != "alice" {
+		t.Errorf("port 8081 = %q, want alice", ports[8081])
+	}
+	if ports[8082] != "bob" {
+		t.Errorf("port 8082 = %q, want bob", ports[8082])
+	}
+}
+
+func TestListPortsEmpty(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass")
+
+	ports, err := db.ListPorts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ports) != 0 {
+		t.Errorf("expected 0 port assignments, got %d", len(ports))
+	}
+}
+
+func TestPortOwner(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass")
+	db.UpdatePort("alice", 8081)
+
+	owner, err := db.PortOwner(8081)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner != "alice" {
+		t.Errorf("expected alice, got %q", owner)
+	}
+}
+
+func TestPortOwnerUnassigned(t *testing.T) {
+	db := openTestDB(t)
+
+	owner, err := db.PortOwner(8081)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner != "" {
+		t.Errorf("expected empty for unassigned port, got %q", owner)
+	}
+}
+
+func TestMigrationAddsPortColumn(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Create DB with schema missing the port column
+	sqlDB, err := openRawDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.Exec(`CREATE TABLE users (
+		username TEXT PRIMARY KEY,
+		password_hash TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+		dns_server TEXT NOT NULL DEFAULT '',
+		dns_protocol TEXT NOT NULL DEFAULT ''
+	)`)
+	sqlDB.Exec("INSERT INTO users (username, password_hash) VALUES ('alice', 'hash')")
+	sqlDB.Close()
+
+	// Open with migration — should add port column
+	db, err := Open(dbPath, "")
+	if err != nil {
+		t.Fatalf("Open after migration: %v", err)
+	}
+	defer db.Close()
+
+	users, err := db.List()
+	if err != nil {
+		t.Fatalf("List after migration: %v", err)
+	}
+	if users[0].Port != 0 {
+		t.Errorf("expected default port 0 after migration, got %d", users[0].Port)
+	}
+
+	// Port operations should work
+	if err := db.UpdatePort("alice", 8085); err != nil {
+		t.Fatalf("UpdatePort after migration: %v", err)
+	}
+	owner, _ := db.PortOwner(8085)
+	if owner != "alice" {
+		t.Errorf("PortOwner after migration = %q, want alice", owner)
+	}
+}
+
 // openRawDB opens a raw sql.DB for test setup (no migration).
 func openRawDB(path string) (*sql.DB, error) {
 	return sql.Open("sqlite", path+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")

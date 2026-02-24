@@ -20,7 +20,7 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Collector, users *userdb.DB, m *metrics.Metrics) *Server {
+func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics) *Server {
 	sessions := NewSessionStore(1 * time.Hour)
 	a := &api{
 		auth:     adminAuth,
@@ -28,6 +28,7 @@ func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Co
 		sessions: sessions,
 		stats:    collector,
 		users:    users,
+		ports:    ports,
 	}
 
 	mux := http.NewServeMux()
@@ -47,6 +48,7 @@ func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Co
 	mux.HandleFunc("/api/logs", a.requireSession(a.handleLogs))
 	mux.HandleFunc("/api/users", a.requireSession(a.handleUsers))
 	mux.HandleFunc("/api/users/password", a.requireSession(a.handleChangePassword))
+	mux.HandleFunc("/api/users/port", a.requireSession(a.handleUpdatePort))
 	mux.HandleFunc("/api/users/dns", a.requireSession(a.handleUpdateDNS))
 	mux.HandleFunc("/api/users/dns/test", a.requireSession(a.handleTestDNS))
 

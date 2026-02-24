@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +21,23 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	clientIP := clientAddr(r)
 	host := r.Host
+
+	// Per-user port: user is already identified by the listening port.
+	// Hijack and tunnel directly — no auth challenge needed.
+	if ctxUser := userFromCtx(r.Context()); ctxUser != "" {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijack not supported", http.StatusInternalServerError)
+			return
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		h.connectTunnel(conn, bufrw, r.Context(), start, clientIP, host, ctxUser)
+		return
+	}
 
 	// Rate limit check
 	if !h.limiter.Allow(clientIP) {
@@ -110,8 +129,14 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Cache successful auth for this IP
 	h.recordAuthSuccess(clientIP, user)
 
+	h.connectTunnel(conn, bufrw, r.Context(), start, clientIP, host, user)
+}
+
+// connectTunnel establishes the CONNECT tunnel after authentication succeeds.
+// Handles ACL check, DNS resolution, dialing, and bidirectional copy.
+func (h *Handler) connectTunnel(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx context.Context, start time.Time, clientIP, host, user string) {
 	// Attach per-user DNS resolver to context
-	ctx := h.ctxWithUserDNS(r.Context(), user)
+	ctx := h.ctxWithUserDNS(baseCtx, user)
 
 	// ACL check
 	if !h.acl.Allow(host) {

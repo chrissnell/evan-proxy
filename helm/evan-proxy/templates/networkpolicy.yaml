@@ -27,6 +27,14 @@ spec:
     - ports:
         - port: 9090
           protocol: TCP
+    # Allow per-user dedicated proxy ports
+    - ports:
+      {{- $min := .Values.proxy.userPortMin | int }}
+      {{- $max := .Values.proxy.userPortMax | int }}
+      {{- range $p := untilStep $min (add1 $max | int) 1 }}
+        - port: {{ $p }}
+          protocol: TCP
+      {{- end }}
   egress:
     # Allow DNS
     - ports:

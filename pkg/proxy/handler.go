@@ -29,12 +29,22 @@ type UserDNSGetter interface {
 	GetDNS(username string) (server, protocol string)
 }
 
+// PortLister returns per-user port assignments from the database.
+type PortLister interface {
+	ListPorts() (map[int]string, error)
+	UpdatePort(username string, port int) error
+	PortOwner(port int) (string, error)
+}
+
 // ErrDNSBlocked is returned when DNS resolves to a loopback or null address.
 var ErrDNSBlocked = errors.New("dns blocked")
 
 type ctxKey int
 
-const dnsResolverKey ctxKey = iota
+const (
+	dnsResolverKey ctxKey = iota
+	proxyUserKey          // pre-identified user from per-user port
+)
 
 // authSession tracks a recently authenticated client IP.
 type authSession struct {
@@ -45,6 +55,7 @@ type authSession struct {
 type Handler struct {
 	users           UserChecker
 	dnsGetter       UserDNSGetter
+	portDB          PortLister
 	acl             acl.ACL
 	limiter         *ratelimit.Limiter
 	logger          *logging.Logger
@@ -60,6 +71,11 @@ type Handler struct {
 	// iOS/macOS which may not retry CONNECT auth for subresource requests.
 	authMu       sync.RWMutex
 	authSessions map[string]authSession
+
+	// Per-user dedicated port listeners
+	portMu      sync.RWMutex
+	portUsers   map[int]string       // port → username
+	userServers map[int]*http.Server // port → running server
 }
 
 // loopbackNet covers 127.0.0.0/8 used by DNS-blocking resolvers.
@@ -74,7 +90,7 @@ func isDNSBlocked(ip net.IP) bool {
 	return ip.IsLoopback() || ip.Equal(net.IPv4zero) || loopbackNet.Contains(ip)
 }
 
-func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, state *admin.ProxyState) *Handler {
+func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB PortLister, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, state *admin.ProxyState) *Handler {
 	defaultResolver, err := edns.New(cfg.DNSProtocol, cfg.DNSServer)
 	if err != nil {
 		panic(fmt.Sprintf("dns resolver: %v", err))
@@ -90,6 +106,7 @@ func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, a acl.A
 	h := &Handler{
 		users:           users,
 		dnsGetter:       dnsGetter,
+		portDB:          portDB,
 		acl:             a,
 		limiter:         rl,
 		logger:          lg,
@@ -98,6 +115,8 @@ func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, a acl.A
 		cfg:             cfg,
 		defaultResolver: defaultResolver,
 		authSessions:    make(map[string]authSession),
+		portUsers:       make(map[int]string),
+		userServers:     make(map[int]*http.Server),
 	}
 
 	// Wraps DialContext to detect DNS-blocked addresses before connecting.
@@ -193,6 +212,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		h.handleForward(w, r)
 	}
+}
+
+// userFromCtx returns the pre-identified username from context, or "".
+func userFromCtx(ctx context.Context) string {
+	if u, ok := ctx.Value(proxyUserKey).(string); ok {
+		return u
+	}
+	return ""
 }
 
 // clientAddr extracts the client IP without port.

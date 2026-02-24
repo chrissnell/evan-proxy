@@ -17,12 +17,19 @@ import (
 	"evan-proxy/pkg/userdb"
 )
 
+// PortManager controls per-user dedicated proxy port listeners.
+type PortManager interface {
+	UpdateUserPort(username string, port int) error
+	UserPortRange() (min, max int)
+}
+
 type api struct {
 	auth     *auth.AdminAuth
 	state    *ProxyState
 	sessions *SessionStore
 	stats    *stats.Collector
 	users    *userdb.DB
+	ports    PortManager
 }
 
 type loginRequest struct {
@@ -229,6 +236,59 @@ func (a *api) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("change password: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+type portRequest struct {
+	Username string `json:"username"`
+	Port     int    `json:"port"`
+}
+
+func (a *api) handleUpdatePort(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req portRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.Username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate port range (0 means unassign)
+	if req.Port != 0 {
+		min, max := a.ports.UserPortRange()
+		if req.Port < min || req.Port > max {
+			http.Error(w, fmt.Sprintf("port must be between %d and %d", min, max), http.StatusBadRequest)
+			return
+		}
+		// Check if port is already assigned to a different user
+		owner, err := a.users.PortOwner(req.Port)
+		if err != nil {
+			log.Printf("check port owner: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if owner != "" && owner != req.Username {
+			http.Error(w, fmt.Sprintf("port %d is already assigned to %q", req.Port, owner), http.StatusConflict)
+			return
+		}
+	}
+
+	if err := a.ports.UpdateUserPort(req.Username, req.Port); err != nil {
+		if errors.Is(err, userdb.ErrUnknownUser) {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("update port: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

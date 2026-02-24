@@ -28,5 +28,13 @@ spec:
       port: {{ .Values.service.adminPort }}
       targetPort: admin
       protocol: TCP
+    {{- $min := .Values.proxy.userPortMin | int }}
+    {{- $max := .Values.proxy.userPortMax | int }}
+    {{- range $p := untilStep $min (add1 $max | int) 1 }}
+    - name: user-{{ $p }}
+      port: {{ $p }}
+      targetPort: {{ $p }}
+      protocol: TCP
+    {{- end }}
   selector:
     {{- include "evan-proxy.selectorLabels" . | nindent 4 }}

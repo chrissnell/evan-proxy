@@ -47,8 +47,13 @@ func main() {
 
 	counter := stats.NewTrafficCounter(collector)
 	counter.AddObserver(m.ObserveLiveBytes)
-	proxyHandler := proxy.New(cfg, users, users, a, limiter, logger, counter, state)
-	adminServer := admin.NewServer(adminAuth, state, collector, users, m)
+	proxyHandler := proxy.New(cfg, users, users, users, a, limiter, logger, counter, state)
+	adminServer := admin.NewServer(adminAuth, state, collector, users, proxyHandler, m)
+
+	// Per-user dedicated port listeners
+	if err := proxyHandler.StartUserListeners(); err != nil {
+		log.Fatalf("user listeners: %v", err)
+	}
 
 	// Plain proxy listener
 	plainSrv := &http.Server{
@@ -108,6 +113,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	proxyHandler.ShutdownUserListeners(ctx)
 	plainSrv.Shutdown(ctx)
 	if tlsSrv != nil {
 		tlsSrv.Shutdown(ctx)

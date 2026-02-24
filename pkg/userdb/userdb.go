@@ -48,6 +48,7 @@ type UserInfo struct {
 	CreatedAt   string `json:"created_at"`
 	DNSServer   string `json:"dns_server"`
 	DNSProtocol string `json:"dns_protocol"`
+	Port        int    `json:"port"`
 }
 
 type DNSEntry struct {
@@ -151,6 +152,12 @@ func (d *DB) migrate() error {
 			return fmt.Errorf("adding dns_protocol column: %w", err)
 		}
 		log.Println("userdb: migrated — added dns_protocol column")
+	}
+	if !cols["port"] {
+		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN port INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("adding port column: %w", err)
+		}
+		log.Println("userdb: migrated — added port column")
 	}
 	return nil
 }
@@ -284,7 +291,7 @@ func (d *DB) ChangePassword(username, newPassword string) error {
 
 // List returns all usernames and their creation times.
 func (d *DB) List() ([]UserInfo, error) {
-	rows, err := d.db.Query("SELECT username, created_at, dns_server, dns_protocol FROM users ORDER BY username")
+	rows, err := d.db.Query("SELECT username, created_at, dns_server, dns_protocol, port FROM users ORDER BY username")
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)
 	}
@@ -293,12 +300,58 @@ func (d *DB) List() ([]UserInfo, error) {
 	var users []UserInfo
 	for rows.Next() {
 		var u UserInfo
-		if err := rows.Scan(&u.Username, &u.CreatedAt, &u.DNSServer, &u.DNSProtocol); err != nil {
+		if err := rows.Scan(&u.Username, &u.CreatedAt, &u.DNSServer, &u.DNSProtocol, &u.Port); err != nil {
 			return nil, fmt.Errorf("scanning user: %w", err)
 		}
 		users = append(users, u)
 	}
 	return users, rows.Err()
+}
+
+// ListPorts returns a map of port → username for all users with assigned ports.
+func (d *DB) ListPorts() (map[int]string, error) {
+	rows, err := d.db.Query("SELECT port, username FROM users WHERE port > 0")
+	if err != nil {
+		return nil, fmt.Errorf("listing ports: %w", err)
+	}
+	defer rows.Close()
+
+	ports := make(map[int]string)
+	for rows.Next() {
+		var port int
+		var username string
+		if err := rows.Scan(&port, &username); err != nil {
+			return nil, fmt.Errorf("scanning port: %w", err)
+		}
+		ports[port] = username
+	}
+	return ports, rows.Err()
+}
+
+// UpdatePort assigns a dedicated proxy port to a user. Pass 0 to clear.
+func (d *DB) UpdatePort(username string, port int) error {
+	res, err := d.db.Exec("UPDATE users SET port = ? WHERE username = ?", port, username)
+	if err != nil {
+		return fmt.Errorf("updating port: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("%w: %q", ErrUnknownUser, username)
+	}
+	return nil
+}
+
+// PortOwner returns the username that owns a given port, or "" if unassigned.
+func (d *DB) PortOwner(port int) (string, error) {
+	var username string
+	err := d.db.QueryRow("SELECT username FROM users WHERE port = ?", port).Scan(&username)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("querying port owner: %w", err)
+	}
+	return username, nil
 }
 
 // Check validates a Proxy-Authorization header value.

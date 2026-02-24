@@ -21,6 +21,8 @@ proxy:
   authFailWindow: "60s"
   dnsServer: ""    # e.g. "1.1.1.1:53", empty = system default
   dnsProtocol: ""  # "plain", "tls", or "https" — empty = plain
+  userPortMin: 8081  # start of per-user dedicated port range
+  userPortMax: 8090  # end of per-user dedicated port range (10 ports)
 
 # Persistent storage for SQLite user database
 persistence:

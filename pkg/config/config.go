@@ -41,6 +41,10 @@ type Config struct {
 	AuthFailRateLimit int
 	AuthFailWindow    time.Duration
 
+	// Per-user dedicated proxy ports
+	UserPortMin int // first port in range (inclusive)
+	UserPortMax int // last port in range (inclusive)
+
 	// Logging
 	LogFormat string // "json" or "human"
 }
@@ -64,6 +68,8 @@ func Load() (*Config, error) {
 		HTTPTimeout:        envDuration("HTTP_TIMEOUT", 30*time.Second),
 		AuthFailRateLimit:  envInt("AUTH_FAIL_RATE_LIMIT", 5),
 		AuthFailWindow:     envDuration("AUTH_FAIL_WINDOW", 60*time.Second),
+		UserPortMin:        envInt("USER_PORT_MIN", 8081),
+		UserPortMax:        envInt("USER_PORT_MAX", 8090),
 		LogFormat:          envOr("LOG_FORMAT", "human"),
 	}
 
@@ -96,6 +102,9 @@ func (c *Config) validate() error {
 	}
 	if c.DNSProtocol != "plain" && c.DNSServer == "" {
 		return fmt.Errorf("DNS_SERVER is required when DNS_PROTOCOL is %q", c.DNSProtocol)
+	}
+	if c.UserPortMin > c.UserPortMax {
+		return fmt.Errorf("USER_PORT_MIN (%d) must be <= USER_PORT_MAX (%d)", c.UserPortMin, c.UserPortMax)
 	}
 	return nil
 }

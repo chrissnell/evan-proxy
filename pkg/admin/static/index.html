@@ -25,9 +25,9 @@
     <h2>proxy users</h2>
     <div id="users-error" class="error" style="display:none"></div>
     <table class="user-table" id="user-table">
-      <thead><tr><th>username</th><th>created</th><th>dns</th><th></th></tr></thead>
+      <thead><tr><th>username</th><th>created</th><th>port</th><th>dns</th><th></th></tr></thead>
       <tbody id="user-tbody">
-        <tr><td colspan="4" class="empty">loading...</td></tr>
+        <tr><td colspan="5" class="empty">loading...</td></tr>
       </tbody>
     </table>
     <div class="user-add-form">
@@ -174,18 +174,21 @@ var dnsEditUser = null; // track which user's DNS row is open
 function renderUsers(users) {
   var tbody = document.getElementById('user-tbody');
   if (!users || users.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty">no users</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">no users</td></tr>';
     return;
   }
   var rows = [];
   users.forEach(function(u) {
     var created = u.created_at ? u.created_at.substring(0, 10) : '';
+    var portLabel = u.port ? '<span>' + u.port + '</span>' : '<span class="dim">none</span>';
     var dnsLabel = u.dns_server ? escHtml(u.dns_protocol + '://' + u.dns_server) : '<span class="dim">default</span>';
     rows.push('<tr>' +
       '<td>' + escHtml(u.username) + '</td>' +
       '<td class="dim">' + escHtml(created) + '</td>' +
+      '<td>' + portLabel + '</td>' +
       '<td>' + dnsLabel + '</td>' +
       '<td class="user-actions">' +
+        '<button class="btn-sm" onclick="changePort(\'' + escAttr(u.username) + '\',' + (u.port||0) + ')">port</button>' +
         '<button class="btn-sm" onclick="toggleDNSEdit(\'' + escAttr(u.username) + '\')">dns</button>' +
         '<button class="btn-sm" onclick="changePassword(\'' + escAttr(u.username) + '\')">password</button>' +
         '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escAttr(u.username) + '\')">delete</button>' +
@@ -200,7 +203,7 @@ function renderUsers(users) {
         return '<button class="' + cls + '" onclick="setDNSProto(\'' + esc + '\',\'' + val + '\')">' + label + '</button>';
       }
       rows.push('<tr class="dns-edit-row">' +
-        '<td></td><td></td>' +
+        '<td></td><td></td><td></td>' +
         '<td class="dns-edit-cell" colspan="2">' +
           '<div class="dns-edit-form">' +
             '<span class="dns-proto-group">' +
@@ -318,6 +321,26 @@ async function deleteUser(username) {
   var resp = await fetch('/api/users?username=' + encodeURIComponent(username), {method: 'DELETE'});
   if (resp.status === 401) { window.location.href = '/login'; return; }
   if (!resp.ok) { showUsersError('failed to delete user'); return; }
+  refreshUsers();
+}
+
+async function changePort(username, current) {
+  var input = prompt('Dedicated proxy port for "' + username + '" (0 to clear):', current || '');
+  if (input === null) return;
+  var port = parseInt(input, 10);
+  if (isNaN(port) || port < 0) { showUsersError('invalid port number'); return; }
+  showUsersError('');
+  var resp = await fetch('/api/users/port', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, port: port})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) {
+    var text = await resp.text();
+    showUsersError(text || 'failed to update port');
+    return;
+  }
   refreshUsers();
 }
 
