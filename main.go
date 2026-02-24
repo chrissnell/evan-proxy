@@ -47,7 +47,7 @@ func main() {
 
 	counter := stats.NewTrafficCounter(collector)
 	counter.AddObserver(m.ObserveLiveBytes)
-	proxyHandler := proxy.New(cfg, users, a, limiter, logger, counter, state)
+	proxyHandler := proxy.New(cfg, users, users, a, limiter, logger, counter, state)
 	adminServer := admin.NewServer(adminAuth, state, collector, users, m)
 
 	// Plain proxy listener

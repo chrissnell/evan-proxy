@@ -44,14 +44,24 @@ type cachedAuth struct {
 }
 
 type UserInfo struct {
-	Username  string `json:"username"`
-	CreatedAt string `json:"created_at"`
+	Username    string `json:"username"`
+	CreatedAt   string `json:"created_at"`
+	DNSServer   string `json:"dns_server"`
+	DNSProtocol string `json:"dns_protocol"`
+}
+
+type DNSEntry struct {
+	Server   string
+	Protocol string
 }
 
 type DB struct {
 	db    *sql.DB
 	mu    sync.RWMutex
 	cache map[string]cachedAuth
+
+	dnsMu    sync.RWMutex
+	dnsCache map[string]DNSEntry // username -> dns config
 }
 
 // Open opens (or creates) the SQLite user database at path.
@@ -77,8 +87,14 @@ func Open(path, seedFile string) (*DB, error) {
 	}
 
 	udb := &DB{
-		db:    sqlDB,
-		cache: make(map[string]cachedAuth),
+		db:       sqlDB,
+		cache:    make(map[string]cachedAuth),
+		dnsCache: make(map[string]DNSEntry),
+	}
+
+	if err := udb.migrate(); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("migrating database: %w", err)
 	}
 
 	// Seed from JSON file if database is empty
@@ -88,11 +104,112 @@ func Open(path, seedFile string) (*DB, error) {
 		}
 	}
 
+	if err := udb.loadDNSCache(); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("loading DNS cache: %w", err)
+	}
+
 	return udb, nil
 }
 
 func (d *DB) Close() error {
 	return d.db.Close()
+}
+
+// migrate adds columns introduced after the initial schema.
+func (d *DB) migrate() error {
+	rows, err := d.db.Query("PRAGMA table_info(users)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	cols := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		cols[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if !cols["dns_server"] {
+		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN dns_server TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("adding dns_server column: %w", err)
+		}
+		log.Println("userdb: migrated — added dns_server column")
+	}
+	if !cols["dns_protocol"] {
+		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN dns_protocol TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("adding dns_protocol column: %w", err)
+		}
+		log.Println("userdb: migrated — added dns_protocol column")
+	}
+	return nil
+}
+
+// loadDNSCache populates the in-memory DNS config cache from the database.
+func (d *DB) loadDNSCache() error {
+	rows, err := d.db.Query("SELECT username, dns_server, dns_protocol FROM users WHERE dns_server != ''")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	d.dnsMu.Lock()
+	defer d.dnsMu.Unlock()
+
+	for rows.Next() {
+		var username, server, protocol string
+		if err := rows.Scan(&username, &server, &protocol); err != nil {
+			return err
+		}
+		d.dnsCache[username] = DNSEntry{Server: server, Protocol: protocol}
+	}
+	return rows.Err()
+}
+
+// GetDNS returns the per-user DNS config from the in-memory cache.
+// Empty strings mean the user has no override (use global default).
+func (d *DB) GetDNS(username string) (server, protocol string) {
+	d.dnsMu.RLock()
+	entry, ok := d.dnsCache[username]
+	d.dnsMu.RUnlock()
+	if !ok {
+		return "", ""
+	}
+	return entry.Server, entry.Protocol
+}
+
+// UpdateDNS sets per-user DNS configuration.
+// Pass empty strings to clear the override.
+func (d *DB) UpdateDNS(username, server, protocol string) error {
+	res, err := d.db.Exec("UPDATE users SET dns_server = ?, dns_protocol = ? WHERE username = ?",
+		server, protocol, username)
+	if err != nil {
+		return fmt.Errorf("updating DNS config: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("%w: %q", ErrUnknownUser, username)
+	}
+
+	d.dnsMu.Lock()
+	if server == "" {
+		delete(d.dnsCache, username)
+	} else {
+		d.dnsCache[username] = DNSEntry{Server: server, Protocol: protocol}
+	}
+	d.dnsMu.Unlock()
+
+	return nil
 }
 
 // Add creates a new user with an argon2id-hashed password.
@@ -131,6 +248,10 @@ func (d *DB) Delete(username string) error {
 	delete(d.cache, username)
 	d.mu.Unlock()
 
+	d.dnsMu.Lock()
+	delete(d.dnsCache, username)
+	d.dnsMu.Unlock()
+
 	return nil
 }
 
@@ -163,7 +284,7 @@ func (d *DB) ChangePassword(username, newPassword string) error {
 
 // List returns all usernames and their creation times.
 func (d *DB) List() ([]UserInfo, error) {
-	rows, err := d.db.Query("SELECT username, created_at FROM users ORDER BY username")
+	rows, err := d.db.Query("SELECT username, created_at, dns_server, dns_protocol FROM users ORDER BY username")
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)
 	}
@@ -172,7 +293,7 @@ func (d *DB) List() ([]UserInfo, error) {
 	var users []UserInfo
 	for rows.Next() {
 		var u UserInfo
-		if err := rows.Scan(&u.Username, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.Username, &u.CreatedAt, &u.DNSServer, &u.DNSProtocol); err != nil {
 			return nil, fmt.Errorf("scanning user: %w", err)
 		}
 		users = append(users, u)

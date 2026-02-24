@@ -110,6 +110,9 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Cache successful auth for this IP
 	h.recordAuthSuccess(clientIP, user)
 
+	// Attach per-user DNS resolver to context
+	ctx := h.ctxWithUserDNS(r.Context(), user)
+
 	// ACL check
 	if !h.acl.Allow(host) {
 		conn.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
@@ -121,7 +124,7 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dial target
-	targetConn, err := h.dial(r.Context(), "tcp", host)
+	targetConn, err := h.dial(ctx, "tcp", host)
 	if err != nil {
 		status := 502
 		if errors.Is(err, ErrDNSBlocked) {

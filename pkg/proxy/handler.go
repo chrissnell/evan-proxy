@@ -13,6 +13,7 @@ import (
 	"evan-proxy/pkg/acl"
 	"evan-proxy/pkg/admin"
 	"evan-proxy/pkg/config"
+	edns "evan-proxy/pkg/dns"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
@@ -23,8 +24,17 @@ type UserChecker interface {
 	Check(proxyAuthHeader string) (string, error)
 }
 
+// UserDNSGetter returns per-user DNS configuration.
+type UserDNSGetter interface {
+	GetDNS(username string) (server, protocol string)
+}
+
 // ErrDNSBlocked is returned when DNS resolves to a loopback or null address.
 var ErrDNSBlocked = errors.New("dns blocked")
+
+type ctxKey int
+
+const dnsResolverKey ctxKey = iota
 
 // authSession tracks a recently authenticated client IP.
 type authSession struct {
@@ -33,15 +43,17 @@ type authSession struct {
 }
 
 type Handler struct {
-	users     UserChecker
-	acl       acl.ACL
-	limiter   *ratelimit.Limiter
-	logger    *logging.Logger
-	counter   *stats.TrafficCounter
-	transport *http.Transport
-	dial      func(ctx context.Context, network, address string) (net.Conn, error)
-	state     *admin.ProxyState
-	cfg       *config.Config
+	users           UserChecker
+	dnsGetter       UserDNSGetter
+	acl             acl.ACL
+	limiter         *ratelimit.Limiter
+	logger          *logging.Logger
+	counter         *stats.TrafficCounter
+	transport       *http.Transport
+	dial            func(ctx context.Context, network, address string) (net.Conn, error)
+	state           *admin.ProxyState
+	cfg             *config.Config
+	defaultResolver *edns.Resolver
 
 	// IP-based auth cache: after a client authenticates, allow subsequent
 	// requests from the same IP without re-challenging. This handles
@@ -62,26 +74,34 @@ func isDNSBlocked(ip net.IP) bool {
 	return ip.IsLoopback() || ip.Equal(net.IPv4zero) || loopbackNet.Contains(ip)
 }
 
-func New(cfg *config.Config, users UserChecker, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, state *admin.ProxyState) *Handler {
+func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, state *admin.ProxyState) *Handler {
+	defaultResolver, err := edns.New(cfg.DNSProtocol, cfg.DNSServer)
+	if err != nil {
+		panic(fmt.Sprintf("dns resolver: %v", err))
+	}
+
 	dialer := &net.Dialer{
 		Timeout: cfg.ConnectDialTimeout,
 	}
+	if nr := defaultResolver.NetResolver(); nr != nil {
+		dialer.Resolver = nr
+	}
 
-	var resolver *net.Resolver
-	if cfg.DNSServer != "" {
-		resolver = &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 5 * time.Second}
-				return d.DialContext(ctx, "udp", cfg.DNSServer)
-			},
-		}
-		dialer.Resolver = resolver
-	} else {
-		resolver = net.DefaultResolver
+	h := &Handler{
+		users:           users,
+		dnsGetter:       dnsGetter,
+		acl:             a,
+		limiter:         rl,
+		logger:          lg,
+		counter:         tc,
+		state:           state,
+		cfg:             cfg,
+		defaultResolver: defaultResolver,
+		authSessions:    make(map[string]authSession),
 	}
 
 	// Wraps DialContext to detect DNS-blocked addresses before connecting.
+	// Reads per-user resolver from context; falls back to the global default.
 	dialWithBlockCheck := func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
@@ -90,6 +110,7 @@ func New(cfg *config.Config, users UserChecker, a acl.ACL, rl *ratelimit.Limiter
 
 		// Only check hostnames, not bare IPs
 		if net.ParseIP(host) == nil {
+			resolver := h.resolverFromCtx(ctx)
 			ips, err := resolver.LookupIPAddr(ctx, host)
 			if err != nil {
 				return nil, err
@@ -104,7 +125,7 @@ func New(cfg *config.Config, users UserChecker, a acl.ACL, rl *ratelimit.Limiter
 		return dialer.DialContext(ctx, network, address)
 	}
 
-	transport := &http.Transport{
+	h.transport = &http.Transport{
 		DialContext:           dialWithBlockCheck,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
@@ -112,19 +133,33 @@ func New(cfg *config.Config, users UserChecker, a acl.ACL, rl *ratelimit.Limiter
 		ExpectContinueTimeout: 1 * time.Second,
 		ResponseHeaderTimeout: cfg.HTTPTimeout,
 	}
+	h.dial = dialWithBlockCheck
 
-	return &Handler{
-		users:        users,
-		acl:          a,
-		limiter:      rl,
-		logger:       lg,
-		counter:      tc,
-		transport:    transport,
-		dial:         dialWithBlockCheck,
-		state:        state,
-		cfg:          cfg,
-		authSessions: make(map[string]authSession),
+	return h
+}
+
+// resolverFromCtx returns the per-user resolver from context, or the global default.
+func (h *Handler) resolverFromCtx(ctx context.Context) *edns.Resolver {
+	if r, ok := ctx.Value(dnsResolverKey).(*edns.Resolver); ok && r != nil {
+		return r
 	}
+	return h.defaultResolver
+}
+
+// ctxWithUserDNS returns a context with the per-user DNS resolver attached, if configured.
+func (h *Handler) ctxWithUserDNS(ctx context.Context, username string) context.Context {
+	if h.dnsGetter == nil {
+		return ctx
+	}
+	server, protocol := h.dnsGetter.GetDNS(username)
+	if server == "" {
+		return ctx
+	}
+	resolver, err := edns.GetOrCreate(protocol, server)
+	if err != nil {
+		return ctx
+	}
+	return context.WithValue(ctx, dnsResolverKey, resolver)
 }
 
 const authSessionTTL = 5 * time.Minute

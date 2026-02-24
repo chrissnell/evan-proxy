@@ -231,6 +231,50 @@ func (a *api) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+type dnsRequest struct {
+	Username    string `json:"username"`
+	DNSServer   string `json:"dns_server"`
+	DNSProtocol string `json:"dns_protocol"`
+}
+
+func (a *api) handleUpdateDNS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req dnsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.Username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate protocol if server is set.
+	if req.DNSServer != "" {
+		switch req.DNSProtocol {
+		case "plain", "tls", "https":
+		default:
+			http.Error(w, "dns_protocol must be 'plain', 'tls', or 'https'", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := a.users.UpdateDNS(req.Username, req.DNSServer, req.DNSProtocol); err != nil {
+		if errors.Is(err, userdb.ErrUnknownUser) {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("update dns: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (a *api) handleLogs(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

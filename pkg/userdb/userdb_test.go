@@ -1,6 +1,7 @@
 package userdb
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"os"
@@ -285,6 +286,142 @@ func TestHashAndVerify(t *testing.T) {
 	if verifyPassword("wrong", hash) {
 		t.Error("verifyPassword should return false for wrong password")
 	}
+}
+
+func TestMigrationAddsColumns(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Create DB with old schema (no dns columns).
+	sqlDB, err := openRawDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.Exec(`CREATE TABLE users (
+		username TEXT PRIMARY KEY,
+		password_hash TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+	)`)
+	sqlDB.Exec("INSERT INTO users (username, password_hash) VALUES ('alice', 'hash')")
+	sqlDB.Close()
+
+	// Open with migration.
+	db, err := Open(dbPath, "")
+	if err != nil {
+		t.Fatalf("Open after migration: %v", err)
+	}
+	defer db.Close()
+
+	users, err := db.List()
+	if err != nil {
+		t.Fatalf("List after migration: %v", err)
+	}
+	if len(users) != 1 || users[0].Username != "alice" {
+		t.Errorf("unexpected users after migration: %+v", users)
+	}
+	// DNS fields should be empty defaults.
+	if users[0].DNSServer != "" || users[0].DNSProtocol != "" {
+		t.Errorf("expected empty DNS fields, got server=%q protocol=%q",
+			users[0].DNSServer, users[0].DNSProtocol)
+	}
+}
+
+func TestUpdateDNS(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass")
+
+	if err := db.UpdateDNS("alice", "1.1.1.1:853", "tls"); err != nil {
+		t.Fatal(err)
+	}
+
+	server, proto := db.GetDNS("alice")
+	if server != "1.1.1.1:853" || proto != "tls" {
+		t.Errorf("GetDNS = (%q, %q), want (1.1.1.1:853, tls)", server, proto)
+	}
+
+	// Verify persisted in DB via List.
+	users, _ := db.List()
+	if users[0].DNSServer != "1.1.1.1:853" || users[0].DNSProtocol != "tls" {
+		t.Errorf("List DNS = (%q, %q), want (1.1.1.1:853, tls)",
+			users[0].DNSServer, users[0].DNSProtocol)
+	}
+}
+
+func TestUpdateDNSClear(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass")
+	db.UpdateDNS("alice", "1.1.1.1:853", "tls")
+
+	// Clear DNS config.
+	if err := db.UpdateDNS("alice", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	server, proto := db.GetDNS("alice")
+	if server != "" || proto != "" {
+		t.Errorf("GetDNS after clear = (%q, %q), want empty", server, proto)
+	}
+}
+
+func TestUpdateDNSUnknownUser(t *testing.T) {
+	db := openTestDB(t)
+
+	err := db.UpdateDNS("nobody", "1.1.1.1:53", "plain")
+	if !errors.Is(err, ErrUnknownUser) {
+		t.Errorf("expected ErrUnknownUser, got: %v", err)
+	}
+}
+
+func TestGetDNSDefault(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass")
+
+	server, proto := db.GetDNS("alice")
+	if server != "" || proto != "" {
+		t.Errorf("expected empty DNS for new user, got (%q, %q)", server, proto)
+	}
+}
+
+func TestDeleteClearsDNSCache(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass")
+	db.UpdateDNS("alice", "1.1.1.1:853", "tls")
+
+	db.Delete("alice")
+
+	server, proto := db.GetDNS("alice")
+	if server != "" || proto != "" {
+		t.Errorf("GetDNS after delete = (%q, %q), want empty", server, proto)
+	}
+}
+
+func TestDNSCacheLoadedOnOpen(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	// Create DB and set DNS config.
+	db1, _ := Open(dbPath, "")
+	db1.Add("alice", "pass")
+	db1.UpdateDNS("alice", "https://1.1.1.1/dns-query", "https")
+	db1.Close()
+
+	// Re-open — cache should be populated.
+	db2, err := Open(dbPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+
+	server, proto := db2.GetDNS("alice")
+	if server != "https://1.1.1.1/dns-query" || proto != "https" {
+		t.Errorf("GetDNS after reopen = (%q, %q), want (https://1.1.1.1/dns-query, https)",
+			server, proto)
+	}
+}
+
+// openRawDB opens a raw sql.DB for test setup (no migration).
+func openRawDB(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", path+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
 }
 
 func writeFile(path string, data []byte) error {

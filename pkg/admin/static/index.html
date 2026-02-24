@@ -25,9 +25,9 @@
     <h2>proxy users</h2>
     <div id="users-error" class="error" style="display:none"></div>
     <table class="user-table" id="user-table">
-      <thead><tr><th>username</th><th>created</th><th></th></tr></thead>
+      <thead><tr><th>username</th><th>created</th><th>dns</th><th></th></tr></thead>
       <tbody id="user-tbody">
-        <tr><td colspan="3" class="empty">loading...</td></tr>
+        <tr><td colspan="4" class="empty">loading...</td></tr>
       </tbody>
     </table>
     <div class="user-add-form">
@@ -172,15 +172,18 @@ async function refreshUsers() {
 function renderUsers(users) {
   var tbody = document.getElementById('user-tbody');
   if (!users || users.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="3" class="empty">no users</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">no users</td></tr>';
     return;
   }
   tbody.innerHTML = users.map(function(u) {
     var created = u.created_at ? u.created_at.substring(0, 10) : '';
+    var dnsLabel = u.dns_server ? escHtml(u.dns_protocol + '://' + u.dns_server) : '<span class="dim">default</span>';
     return '<tr>' +
       '<td>' + escHtml(u.username) + '</td>' +
       '<td class="dim">' + escHtml(created) + '</td>' +
+      '<td>' + dnsLabel + '</td>' +
       '<td class="user-actions">' +
+        '<button class="btn-sm" onclick="editDNS(\'' + escAttr(u.username) + '\',\'' + escAttr(u.dns_server) + '\',\'' + escAttr(u.dns_protocol) + '\')">dns</button>' +
         '<button class="btn-sm" onclick="changePassword(\'' + escAttr(u.username) + '\')">password</button>' +
         '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escAttr(u.username) + '\')">delete</button>' +
       '</td></tr>';
@@ -233,6 +236,39 @@ async function changePassword(username) {
   });
   if (resp.status === 401) { window.location.href = '/login'; return; }
   if (!resp.ok) { showUsersError('failed to change password'); return; }
+}
+
+async function editDNS(username, currentServer, currentProtocol) {
+  var proto = prompt(
+    'DNS protocol for "' + username + '":\n' +
+    '  plain  = standard DNS (UDP)\n' +
+    '  tls    = DNS-over-TLS (port 853)\n' +
+    '  https  = DNS-over-HTTPS\n' +
+    '  (empty to clear / use global default)',
+    currentProtocol || ''
+  );
+  if (proto === null) return;
+  proto = proto.trim();
+
+  var server = '';
+  if (proto) {
+    var placeholder = proto === 'https' ? 'https://1.1.1.1/dns-query' :
+                      proto === 'tls' ? '1.1.1.1:853' : '1.1.1.1:53';
+    server = prompt('DNS server for "' + username + '" (' + proto + '):', currentServer || placeholder);
+    if (server === null) return;
+    server = server.trim();
+    if (!server) { showUsersError('dns server required when protocol is set'); return; }
+  }
+
+  showUsersError('');
+  var resp = await fetch('/api/users/dns', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, dns_server: server, dns_protocol: proto})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showUsersError('failed to update DNS config'); return; }
+  refreshUsers();
 }
 
 refreshUsers();

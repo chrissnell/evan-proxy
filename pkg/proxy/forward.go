@@ -69,6 +69,9 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 
 	h.recordAuthSuccess(clientIP, user)
 
+	// Attach per-user DNS resolver to context
+	ctx := h.ctxWithUserDNS(r.Context(), user)
+
 	// ACL check
 	if !h.acl.Allow(host) {
 		w.Header().Set("Content-Length", "0")
@@ -82,7 +85,7 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Strip hop-by-hop headers before forwarding
-	outReq := r.Clone(r.Context())
+	outReq := r.Clone(ctx)
 	for _, h := range hopByHopHeaders {
 		outReq.Header.Del(h)
 	}

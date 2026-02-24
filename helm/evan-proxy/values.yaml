@@ -19,7 +19,8 @@ proxy:
   authRetryTimeout: "5s"
   authFailRateLimit: 5
   authFailWindow: "60s"
-  dnsServer: ""  # e.g. "1.1.1.1:53", empty = system default
+  dnsServer: ""    # e.g. "1.1.1.1:53", empty = system default
+  dnsProtocol: ""  # "plain", "tls", or "https" — empty = plain
 
 # Persistent storage for SQLite user database
 persistence:

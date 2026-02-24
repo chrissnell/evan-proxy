@@ -113,5 +113,60 @@ func TestLoadCustomValues(t *testing.T) {
 	}
 }
 
+func TestLoadDNSProtocolDefault(t *testing.T) {
+	setEnv(t, validEnv())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DNSProtocol != "plain" {
+		t.Errorf("DNSProtocol = %q, want plain", cfg.DNSProtocol)
+	}
+}
+
+func TestLoadDNSProtocolInvalid(t *testing.T) {
+	env := validEnv()
+	env["DNS_PROTOCOL"] = "quic"
+	setEnv(t, env)
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for invalid DNS_PROTOCOL")
+	}
+}
+
+func TestLoadDNSProtocolTLSRequiresServer(t *testing.T) {
+	env := validEnv()
+	env["DNS_PROTOCOL"] = "tls"
+	setEnv(t, env)
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for DNS_PROTOCOL=tls without DNS_SERVER")
+	}
+}
+
+func TestLoadDNSProtocolHTTPSRequiresServer(t *testing.T) {
+	env := validEnv()
+	env["DNS_PROTOCOL"] = "https"
+	setEnv(t, env)
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for DNS_PROTOCOL=https without DNS_SERVER")
+	}
+}
+
+func TestLoadDNSProtocolTLSWithServer(t *testing.T) {
+	env := validEnv()
+	env["DNS_PROTOCOL"] = "tls"
+	env["DNS_SERVER"] = "1.1.1.1:853"
+	setEnv(t, env)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DNSProtocol != "tls" {
+		t.Errorf("DNSProtocol = %q, want tls", cfg.DNSProtocol)
+	}
+}
+
 // Suppress unused import warning
 var _ = os.Getenv

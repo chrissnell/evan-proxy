@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"evan-proxy/pkg/acl"
 	"evan-proxy/pkg/admin"
 	"evan-proxy/pkg/config"
+	edns "evan-proxy/pkg/dns"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
@@ -42,6 +44,7 @@ func setupProxy(t *testing.T) (*Handler, *admin.ProxyState) {
 		ConnectDialTimeout: 5 * time.Second,
 		IdleTimeout:        30 * time.Second,
 		HTTPTimeout:        10 * time.Second,
+		DNSProtocol:        "plain",
 	}
 
 	limiter := ratelimit.New(10, time.Minute)
@@ -54,7 +57,7 @@ func setupProxy(t *testing.T) (*Handler, *admin.ProxyState) {
 	counter := stats.NewTrafficCounter(collector)
 	t.Cleanup(counter.Stop)
 
-	h := New(cfg, users, acl.AllowAll{}, limiter, logger, counter, state)
+	h := New(cfg, users, users, acl.AllowAll{}, limiter, logger, counter, state)
 	return h, state
 }
 
@@ -277,5 +280,121 @@ func TestDNSBlockForward(t *testing.T) {
 	logOut := logBuf.String()
 	if logOut == "" {
 		t.Error("expected log output")
+	}
+}
+
+// TestResolverFromCtxDefault tests that resolverFromCtx returns the default when no context value.
+func TestResolverFromCtxDefault(t *testing.T) {
+	handler, _ := setupProxy(t)
+
+	ctx := context.Background()
+	r := handler.resolverFromCtx(ctx)
+	if r != handler.defaultResolver {
+		t.Error("expected default resolver when no context value")
+	}
+}
+
+// TestResolverFromCtxOverride tests that resolverFromCtx returns the context resolver.
+func TestResolverFromCtxOverride(t *testing.T) {
+	handler, _ := setupProxy(t)
+
+	customResolver, _ := edns.New("plain", "8.8.8.8:53")
+	ctx := context.WithValue(context.Background(), dnsResolverKey, customResolver)
+
+	r := handler.resolverFromCtx(ctx)
+	if r != customResolver {
+		t.Error("expected custom resolver from context")
+	}
+}
+
+// TestCtxWithUserDNSNoConfig tests ctxWithUserDNS returns unmodified context for user without DNS.
+func TestCtxWithUserDNSNoConfig(t *testing.T) {
+	handler, _ := setupProxy(t)
+
+	ctx := context.Background()
+	got := handler.ctxWithUserDNS(ctx, "alice")
+
+	// No DNS configured for alice, so context should be unchanged.
+	if got.Value(dnsResolverKey) != nil {
+		t.Error("expected no resolver in context for user without DNS config")
+	}
+}
+
+// mockDNSGetter is a test helper implementing UserDNSGetter.
+type mockDNSGetter struct {
+	configs map[string][2]string // username -> [server, protocol]
+}
+
+func (m *mockDNSGetter) GetDNS(username string) (string, string) {
+	if c, ok := m.configs[username]; ok {
+		return c[0], c[1]
+	}
+	return "", ""
+}
+
+// TestCtxWithUserDNSConfigured tests ctxWithUserDNS injects resolver for user with DNS config.
+func TestCtxWithUserDNSConfigured(t *testing.T) {
+	handler, _ := setupProxy(t)
+	handler.dnsGetter = &mockDNSGetter{
+		configs: map[string][2]string{
+			"alice": {"8.8.8.8:53", "plain"},
+		},
+	}
+
+	ctx := handler.ctxWithUserDNS(context.Background(), "alice")
+	r := ctx.Value(dnsResolverKey)
+	if r == nil {
+		t.Fatal("expected resolver in context for user with DNS config")
+	}
+}
+
+// TestCtxWithUserDNSNilGetter tests ctxWithUserDNS gracefully handles nil dnsGetter.
+func TestCtxWithUserDNSNilGetter(t *testing.T) {
+	handler, _ := setupProxy(t)
+	handler.dnsGetter = nil
+
+	ctx := handler.ctxWithUserDNS(context.Background(), "alice")
+	if ctx.Value(dnsResolverKey) != nil {
+		t.Error("expected no resolver when dnsGetter is nil")
+	}
+}
+
+// TestCtxWithUserDNSInvalidProtocol tests ctxWithUserDNS handles invalid protocol gracefully.
+func TestCtxWithUserDNSInvalidProtocol(t *testing.T) {
+	handler, _ := setupProxy(t)
+	handler.dnsGetter = &mockDNSGetter{
+		configs: map[string][2]string{
+			"alice": {"1.1.1.1", "invalid"},
+		},
+	}
+
+	ctx := handler.ctxWithUserDNS(context.Background(), "alice")
+	if ctx.Value(dnsResolverKey) != nil {
+		t.Error("expected no resolver for invalid protocol")
+	}
+}
+
+// TestForwardWithPerUserDNS verifies the full flow with per-user DNS through forward.
+func TestForwardWithPerUserDNS(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer target.Close()
+
+	handler, _ := setupProxy(t)
+	handler.dnsGetter = &mockDNSGetter{
+		configs: map[string][2]string{
+			"alice": {"8.8.8.8:53", "plain"},
+		},
+	}
+
+	req := httptest.NewRequest("GET", target.URL+"/path", nil)
+	req.Header.Set("Proxy-Authorization", basicAuth("alice", "secret"))
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
