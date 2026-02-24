@@ -48,6 +48,7 @@ func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Co
 	mux.HandleFunc("/api/users", a.requireSession(a.handleUsers))
 	mux.HandleFunc("/api/users/password", a.requireSession(a.handleChangePassword))
 	mux.HandleFunc("/api/users/dns", a.requireSession(a.handleUpdateDNS))
+	mux.HandleFunc("/api/users/dns/test", a.requireSession(a.handleTestDNS))
 
 	// Prometheus metrics (no auth — standard for scraping)
 	mux.Handle("/metrics", m.Handler())

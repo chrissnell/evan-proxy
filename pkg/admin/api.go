@@ -1,14 +1,18 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"evan-proxy/pkg/auth"
+	edns "evan-proxy/pkg/dns"
 	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
 )
@@ -261,6 +265,7 @@ func (a *api) handleUpdateDNS(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "dns_protocol must be 'plain', 'tls', or 'https'", http.StatusBadRequest)
 			return
 		}
+		req.DNSServer = normalizeDNSServer(req.DNSServer, req.DNSProtocol)
 	}
 
 	if err := a.users.UpdateDNS(req.Username, req.DNSServer, req.DNSProtocol); err != nil {
@@ -273,6 +278,84 @@ func (a *api) handleUpdateDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// normalizeDNSServer adds default ports or scheme when omitted.
+func normalizeDNSServer(server, protocol string) string {
+	switch protocol {
+	case "plain", "tls":
+		if _, _, err := net.SplitHostPort(server); err != nil {
+			port := "53"
+			if protocol == "tls" {
+				port = "853"
+			}
+			return net.JoinHostPort(server, port)
+		}
+	case "https":
+		if !strings.HasPrefix(server, "https://") {
+			return "https://" + server
+		}
+	}
+	return server
+}
+
+type dnsTestRequest struct {
+	DNSServer   string `json:"dns_server"`
+	DNSProtocol string `json:"dns_protocol"`
+}
+
+type dnsTestResponse struct {
+	OK        bool     `json:"ok"`
+	Addresses []string `json:"addresses,omitempty"`
+	Error     string   `json:"error,omitempty"`
+}
+
+func (a *api) handleTestDNS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req dnsTestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	switch req.DNSProtocol {
+	case "plain", "tls", "https":
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(dnsTestResponse{Error: "invalid protocol"})
+		return
+	}
+
+	req.DNSServer = normalizeDNSServer(req.DNSServer, req.DNSProtocol)
+
+	resolver, err := edns.New(req.DNSProtocol, req.DNSServer)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(dnsTestResponse{Error: err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	addrs, err := resolver.LookupIPAddr(ctx, "google.com")
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(dnsTestResponse{Error: err.Error()})
+		return
+	}
+
+	ips := make([]string, len(addrs))
+	for i, a := range addrs {
+		ips[i] = a.IP.String()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(dnsTestResponse{OK: true, Addresses: ips})
 }
 
 func (a *api) handleLogs(w http.ResponseWriter, r *http.Request) {

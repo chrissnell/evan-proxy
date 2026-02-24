@@ -207,6 +207,9 @@ function renderUsers(users) {
               ' value="' + escAttr(server) + '"' +
               ' placeholder="' + dnsPlaceholder(proto) + '"' +
               (proto === '' ? ' disabled' : '') + '>' +
+            '<button class="btn-sm" onclick="testDNS(\'' + escAttr(u.username) + '\')"' +
+              (proto === '' ? ' disabled' : '') + '>test</button>' +
+            '<span id="dns-result-' + escAttr(u.username) + '"></span>' +
             '<button class="btn-sm btn-save" onclick="saveDNS(\'' + escAttr(u.username) + '\')">save</button>' +
             '<button class="btn-sm" onclick="cancelDNSEdit()">cancel</button>' +
           '</div>' +
@@ -237,9 +240,46 @@ function dnsProtoChanged(username) {
   var sel = document.getElementById('dns-proto-' + username);
   var inp = document.getElementById('dns-server-' + username);
   var proto = sel.value;
-  inp.disabled = (proto === '');
+  var disabled = (proto === '');
+  inp.disabled = disabled;
   inp.placeholder = dnsPlaceholder(proto);
-  if (proto === '') inp.value = '';
+  if (disabled) inp.value = '';
+  // Reset test result and toggle test button.
+  var result = document.getElementById('dns-result-' + username);
+  if (result) result.innerHTML = '';
+  var testBtn = inp.parentNode.querySelector('button');
+  // Find the test button (the one after the input).
+  var btns = inp.parentNode.querySelectorAll('button');
+  for (var i = 0; i < btns.length; i++) {
+    if (btns[i].textContent === 'test') { btns[i].disabled = disabled; break; }
+  }
+}
+
+async function testDNS(username) {
+  var proto = document.getElementById('dns-proto-' + username).value;
+  var server = document.getElementById('dns-server-' + username).value.trim();
+  var result = document.getElementById('dns-result-' + username);
+  result.innerHTML = '';
+
+  if (!proto || !server) return;
+
+  result.innerHTML = '<span class="dns-test-pending">...</span>';
+  try {
+    var resp = await fetch('/api/users/dns/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({dns_server: server, dns_protocol: proto})
+    });
+    if (resp.status === 401) { window.location.href = '/login'; return; }
+    var data = await resp.json();
+    if (data.ok) {
+      result.innerHTML = '<span class="dns-test-ok">\u2713</span>';
+    } else {
+      result.innerHTML = '<span class="dns-test-fail">\u2717</span>';
+    }
+  } catch (e) {
+    result.innerHTML = '<span class="dns-test-fail">\u2717</span>';
+  }
 }
 
 function showUsersError(msg) {
