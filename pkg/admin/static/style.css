@@ -108,7 +108,7 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { opacity: 0.8; }
 
 .container {
-  max-width: 720px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 2rem 1rem;
 }
@@ -353,12 +353,12 @@ button:hover {
   text-align: left;
   color: var(--fg-dim);
   font-weight: 400;
-  padding: 0.25rem 0;
+  padding: 0.25rem 0.75rem 0.25rem 0;
   border-bottom: 1px solid var(--border);
 }
 
 .user-table td {
-  padding: 0.35rem 0;
+  padding: 0.35rem 0.75rem 0.35rem 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 

@@ -184,7 +184,7 @@ function renderUsers(users) {
   var rows = [];
   users.forEach(function(u) {
     var created = u.created_at ? u.created_at.substring(0, 10) : '';
-    var portLabel = u.port ? '<span>' + u.port + '</span>' : '<span class="dim">none</span>';
+    var portLabel = u.port ? '<span>' + u.port + '</span>' : '<span class="dim">8080</span>';
     var dnsLabel = u.dns_server ? escHtml(u.dns_protocol + '://' + u.dns_server) : '<span class="dim">default</span>';
     var esc = escAttr(u.username);
     var delBtn = deleteConfirm === u.username
