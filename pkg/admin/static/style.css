@@ -426,19 +426,7 @@ button:hover {
   align-items: center;
 }
 
-.dns-select {
-  font-family: inherit;
-  font-size: 0.72rem;
-  border: 1px solid var(--btn-border);
-  background: var(--bg-input);
-  color: var(--fg);
-  padding: 0.2rem 0.3rem;
-  border-radius: 2px;
-  cursor: pointer;
-}
-
-.dns-select:focus { border-color: var(--accent); outline: none; }
-
+.dns-select,
 .dns-input {
   font-family: inherit;
   font-size: 0.72rem;
@@ -447,9 +435,13 @@ button:hover {
   color: var(--fg);
   padding: 0.2rem 0.4rem;
   border-radius: 2px;
-  width: 14em;
-  margin-bottom: 0;
+  height: 1.7em;
+  box-sizing: content-box;
+  margin: 0;
 }
+
+.dns-select { cursor: pointer; }
+.dns-input { width: 14em; }
 
 .dns-input:focus { border-color: var(--accent); outline: none; }
 .dns-input:disabled { opacity: 0.4; }
