@@ -169,25 +169,75 @@ async function refreshUsers() {
   } catch (e) { /* retry next cycle */ }
 }
 
+var dnsEditUser = null; // track which user's DNS row is open
+
 function renderUsers(users) {
   var tbody = document.getElementById('user-tbody');
   if (!users || users.length === 0) {
     tbody.innerHTML = '<tr><td colspan="4" class="empty">no users</td></tr>';
     return;
   }
-  tbody.innerHTML = users.map(function(u) {
+  var rows = [];
+  users.forEach(function(u) {
     var created = u.created_at ? u.created_at.substring(0, 10) : '';
     var dnsLabel = u.dns_server ? escHtml(u.dns_protocol + '://' + u.dns_server) : '<span class="dim">default</span>';
-    return '<tr>' +
+    rows.push('<tr>' +
       '<td>' + escHtml(u.username) + '</td>' +
       '<td class="dim">' + escHtml(created) + '</td>' +
       '<td>' + dnsLabel + '</td>' +
       '<td class="user-actions">' +
-        '<button class="btn-sm" onclick="editDNS(\'' + escAttr(u.username) + '\',\'' + escAttr(u.dns_server) + '\',\'' + escAttr(u.dns_protocol) + '\')">dns</button>' +
+        '<button class="btn-sm" onclick="toggleDNSEdit(\'' + escAttr(u.username) + '\')">dns</button>' +
         '<button class="btn-sm" onclick="changePassword(\'' + escAttr(u.username) + '\')">password</button>' +
         '<button class="btn-sm btn-danger" onclick="deleteUser(\'' + escAttr(u.username) + '\')">delete</button>' +
-      '</td></tr>';
-  }).join('');
+      '</td></tr>');
+    if (dnsEditUser === u.username) {
+      var proto = u.dns_protocol || '';
+      var server = u.dns_server || '';
+      rows.push('<tr class="dns-edit-row"><td colspan="4">' +
+        '<div class="dns-edit-form">' +
+          '<select id="dns-proto-' + escAttr(u.username) + '" class="dns-select" onchange="dnsProtoChanged(\'' + escAttr(u.username) + '\')">' +
+            '<option value=""' + (proto === '' ? ' selected' : '') + '>default</option>' +
+            '<option value="plain"' + (proto === 'plain' ? ' selected' : '') + '>plain</option>' +
+            '<option value="tls"' + (proto === 'tls' ? ' selected' : '') + '>tls</option>' +
+            '<option value="https"' + (proto === 'https' ? ' selected' : '') + '>https</option>' +
+          '</select>' +
+          '<input type="text" id="dns-server-' + escAttr(u.username) + '" class="dns-input"' +
+            ' value="' + escAttr(server) + '"' +
+            ' placeholder="' + dnsPlaceholder(proto) + '"' +
+            (proto === '' ? ' disabled' : '') + '>' +
+          '<button class="btn-sm btn-save" onclick="saveDNS(\'' + escAttr(u.username) + '\')">save</button>' +
+          '<button class="btn-sm" onclick="cancelDNSEdit()">cancel</button>' +
+        '</div>' +
+      '</td></tr>');
+    }
+  });
+  tbody.innerHTML = rows.join('');
+}
+
+function dnsPlaceholder(proto) {
+  if (proto === 'https') return 'https://1.1.1.1/dns-query';
+  if (proto === 'tls') return '1.1.1.1:853';
+  if (proto === 'plain') return '1.1.1.1:53';
+  return '';
+}
+
+function toggleDNSEdit(username) {
+  dnsEditUser = (dnsEditUser === username) ? null : username;
+  refreshUsers();
+}
+
+function cancelDNSEdit() {
+  dnsEditUser = null;
+  refreshUsers();
+}
+
+function dnsProtoChanged(username) {
+  var sel = document.getElementById('dns-proto-' + username);
+  var inp = document.getElementById('dns-server-' + username);
+  var proto = sel.value;
+  inp.disabled = (proto === '');
+  inp.placeholder = dnsPlaceholder(proto);
+  if (proto === '') inp.value = '';
 }
 
 function showUsersError(msg) {
@@ -238,27 +288,11 @@ async function changePassword(username) {
   if (!resp.ok) { showUsersError('failed to change password'); return; }
 }
 
-async function editDNS(username, currentServer, currentProtocol) {
-  var proto = prompt(
-    'DNS protocol for "' + username + '":\n' +
-    '  plain  = standard DNS (UDP)\n' +
-    '  tls    = DNS-over-TLS (port 853)\n' +
-    '  https  = DNS-over-HTTPS\n' +
-    '  (empty to clear / use global default)',
-    currentProtocol || ''
-  );
-  if (proto === null) return;
-  proto = proto.trim();
+async function saveDNS(username) {
+  var proto = document.getElementById('dns-proto-' + username).value;
+  var server = document.getElementById('dns-server-' + username).value.trim();
 
-  var server = '';
-  if (proto) {
-    var placeholder = proto === 'https' ? 'https://1.1.1.1/dns-query' :
-                      proto === 'tls' ? '1.1.1.1:853' : '1.1.1.1:53';
-    server = prompt('DNS server for "' + username + '" (' + proto + '):', currentServer || placeholder);
-    if (server === null) return;
-    server = server.trim();
-    if (!server) { showUsersError('dns server required when protocol is set'); return; }
-  }
+  if (proto && !server) { showUsersError('dns server required when protocol is set'); return; }
 
   showUsersError('');
   var resp = await fetch('/api/users/dns', {
@@ -268,6 +302,7 @@ async function editDNS(username, currentServer, currentProtocol) {
   });
   if (resp.status === 401) { window.location.href = '/login'; return; }
   if (!resp.ok) { showUsersError('failed to update DNS config'); return; }
+  dnsEditUser = null;
   refreshUsers();
 }
 

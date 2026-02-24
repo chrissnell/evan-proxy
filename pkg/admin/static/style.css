@@ -410,6 +410,49 @@ button:hover {
   white-space: nowrap;
 }
 
+/* Inline DNS edit */
+.dns-edit-row td {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dns-edit-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.dns-select {
+  font-family: inherit;
+  font-size: 0.78rem;
+  border: 1px solid var(--btn-border);
+  background: var(--bg-input);
+  color: var(--fg);
+  padding: 0.3rem 0.4rem;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.dns-select:focus { border-color: var(--accent); outline: none; }
+
+.dns-input {
+  font-family: inherit;
+  font-size: 0.78rem;
+  border: 1px solid var(--btn-border);
+  background: var(--bg-input);
+  color: var(--fg);
+  padding: 0.3rem 0.4rem;
+  border-radius: 2px;
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.dns-input:focus { border-color: var(--accent); outline: none; }
+.dns-input:disabled { opacity: 0.4; }
+
+.btn-save { color: var(--accent); border-color: var(--accent); }
+.btn-save:hover { background: var(--accent); color: var(--bg); }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
