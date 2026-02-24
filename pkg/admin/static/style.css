@@ -412,23 +412,27 @@ button:hover {
 
 /* Inline DNS edit */
 .dns-edit-row td {
-  padding: 0.5rem 0;
+  padding: 0.25rem 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.dns-edit-cell {
+  text-align: right;
+}
+
 .dns-edit-form {
-  display: flex;
-  gap: 0.4rem;
+  display: inline-flex;
+  gap: 0.35rem;
   align-items: center;
 }
 
 .dns-select {
   font-family: inherit;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   border: 1px solid var(--btn-border);
   background: var(--bg-input);
   color: var(--fg);
-  padding: 0.3rem 0.4rem;
+  padding: 0.2rem 0.3rem;
   border-radius: 2px;
   cursor: pointer;
 }
@@ -437,13 +441,13 @@ button:hover {
 
 .dns-input {
   font-family: inherit;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   border: 1px solid var(--btn-border);
   background: var(--bg-input);
   color: var(--fg);
-  padding: 0.3rem 0.4rem;
+  padding: 0.2rem 0.4rem;
   border-radius: 2px;
-  flex: 1;
+  width: 14em;
   margin-bottom: 0;
 }
 

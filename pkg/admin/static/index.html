@@ -193,22 +193,24 @@ function renderUsers(users) {
     if (dnsEditUser === u.username) {
       var proto = u.dns_protocol || '';
       var server = u.dns_server || '';
-      rows.push('<tr class="dns-edit-row"><td colspan="4">' +
-        '<div class="dns-edit-form">' +
-          '<select id="dns-proto-' + escAttr(u.username) + '" class="dns-select" onchange="dnsProtoChanged(\'' + escAttr(u.username) + '\')">' +
-            '<option value=""' + (proto === '' ? ' selected' : '') + '>default</option>' +
-            '<option value="plain"' + (proto === 'plain' ? ' selected' : '') + '>plain</option>' +
-            '<option value="tls"' + (proto === 'tls' ? ' selected' : '') + '>tls</option>' +
-            '<option value="https"' + (proto === 'https' ? ' selected' : '') + '>https</option>' +
-          '</select>' +
-          '<input type="text" id="dns-server-' + escAttr(u.username) + '" class="dns-input"' +
-            ' value="' + escAttr(server) + '"' +
-            ' placeholder="' + dnsPlaceholder(proto) + '"' +
-            (proto === '' ? ' disabled' : '') + '>' +
-          '<button class="btn-sm btn-save" onclick="saveDNS(\'' + escAttr(u.username) + '\')">save</button>' +
-          '<button class="btn-sm" onclick="cancelDNSEdit()">cancel</button>' +
-        '</div>' +
-      '</td></tr>');
+      rows.push('<tr class="dns-edit-row">' +
+        '<td></td><td></td>' +
+        '<td class="dns-edit-cell" colspan="2">' +
+          '<div class="dns-edit-form">' +
+            '<select id="dns-proto-' + escAttr(u.username) + '" class="dns-select" onchange="dnsProtoChanged(\'' + escAttr(u.username) + '\')">' +
+              '<option value=""' + (proto === '' ? ' selected' : '') + '>default</option>' +
+              '<option value="plain"' + (proto === 'plain' ? ' selected' : '') + '>plain</option>' +
+              '<option value="tls"' + (proto === 'tls' ? ' selected' : '') + '>tls</option>' +
+              '<option value="https"' + (proto === 'https' ? ' selected' : '') + '>https</option>' +
+            '</select>' +
+            '<input type="text" id="dns-server-' + escAttr(u.username) + '" class="dns-input"' +
+              ' value="' + escAttr(server) + '"' +
+              ' placeholder="' + dnsPlaceholder(proto) + '"' +
+              (proto === '' ? ' disabled' : '') + '>' +
+            '<button class="btn-sm btn-save" onclick="saveDNS(\'' + escAttr(u.username) + '\')">save</button>' +
+            '<button class="btn-sm" onclick="cancelDNSEdit()">cancel</button>' +
+          '</div>' +
+        '</td></tr>');
     }
   });
   tbody.innerHTML = rows.join('');
