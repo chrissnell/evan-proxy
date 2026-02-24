@@ -13,16 +13,6 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Allow proxy traffic on plain port
-    - ports:
-        - port: 8080
-          protocol: TCP
-    {{- if .Values.tls.enabled }}
-    # Allow proxy traffic on TLS port
-    - ports:
-        - port: 443
-          protocol: TCP
-    {{- end }}
     # Allow admin traffic on admin port
     - ports:
         - port: 9090

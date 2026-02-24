@@ -16,18 +16,13 @@
     </div>
   </div>
 
-  <div class="box center">
-    <div class="status" id="status">loading...</div>
-    <button class="btn-toggle" id="toggle" disabled>loading...</button>
-  </div>
-
   <div class="box">
     <h2>proxy users</h2>
     <div id="users-error" class="error" style="display:none"></div>
     <table class="user-table" id="user-table">
-      <thead><tr><th>username</th><th>created</th><th>port</th><th>dns</th><th></th></tr></thead>
+      <thead><tr><th>username</th><th>created</th><th>port</th><th>dns</th><th>status</th><th></th></tr></thead>
       <tbody id="user-tbody">
-        <tr><td colspan="5" class="empty">loading...</td></tr>
+        <tr><td colspan="6" class="empty">loading...</td></tr>
       </tbody>
     </table>
     <div class="user-add-form">
@@ -91,7 +86,6 @@ function updateThemeButton() {
   var btn = document.getElementById('theme-toggle');
   var theme = document.documentElement.getAttribute('data-theme');
   if (!theme) {
-    // Using OS default
     var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     btn.textContent = isDark ? 'light' : 'dark';
   } else {
@@ -104,7 +98,6 @@ document.getElementById('theme-toggle').addEventListener('click', function() {
   var isDarkOS = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
   if (!current) {
-    // Currently using OS default, switch to opposite
     var next = isDarkOS ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('evan-proxy-theme', next);
@@ -116,48 +109,16 @@ document.getElementById('theme-toggle').addEventListener('click', function() {
     localStorage.setItem('evan-proxy-theme', 'dark');
   }
   updateThemeButton();
-  refreshTraffic(); // redraw graph with new colors
+  refreshTraffic();
 });
 
 initTheme();
-
-// --- Status & Toggle ---
-async function loadStatus() {
-  const resp = await fetch('/api/status');
-  if (resp.status === 401) { window.location.href = '/login'; return; }
-  const data = await resp.json();
-  updateUI(data.enabled);
-}
-
-function updateUI(enabled) {
-  const statusEl = document.getElementById('status');
-  const toggleEl = document.getElementById('toggle');
-  if (enabled) {
-    statusEl.innerHTML = '<span class="dot dot-enabled"></span><span class="status-enabled">ENABLED</span>';
-    toggleEl.textContent = 'disable proxy';
-  } else {
-    statusEl.innerHTML = '<span class="dot dot-disabled"></span><span class="status-disabled">DISABLED</span>';
-    toggleEl.textContent = 'enable proxy';
-  }
-  toggleEl.disabled = false;
-}
-
-document.getElementById('toggle').addEventListener('click', async () => {
-  const btn = document.getElementById('toggle');
-  btn.disabled = true;
-  const resp = await fetch('/api/proxy/toggle', {method: 'POST'});
-  if (resp.status === 401) { window.location.href = '/login'; return; }
-  const data = await resp.json();
-  updateUI(data.enabled);
-});
 
 document.getElementById('logout').addEventListener('click', async (e) => {
   e.preventDefault();
   await fetch('/api/logout', {method: 'POST'});
   window.location.href = '/login';
 });
-
-loadStatus();
 
 // --- Proxy Users ---
 async function refreshUsers() {
@@ -171,43 +132,57 @@ async function refreshUsers() {
   } catch (e) { /* retry next cycle */ }
 }
 
-var editingUser = null;  // which user has an edit row open
-var editingField = null; // 'dns', 'port', or 'password'
-var deleteConfirm = null; // username pending delete confirmation
+var editingUser = null;
+var editingField = null;
+var deleteConfirm = null;
 
 function renderUsers(users) {
   var tbody = document.getElementById('user-tbody');
   if (!users || users.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">no users</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">no users</td></tr>';
     return;
   }
   var rows = [];
   users.forEach(function(u) {
     var created = u.created_at ? u.created_at.substring(0, 10) : '';
-    var portLabel = u.port ? '<span>' + u.port + '</span>' : '<span class="dim">8080</span>';
+    var portLabel = u.port ? '<span>' + u.port + '</span>' : '<span class="dim">none</span>';
     var dnsLabel = u.dns_server ? escHtml(u.dns_protocol + '://' + u.dns_server) : '<span class="dim">default</span>';
     var esc = escAttr(u.username);
     var delBtn = deleteConfirm === u.username
       ? '<button class="btn-sm btn-danger-confirm" onclick="confirmDelete(\'' + esc + '\')">confirm?</button>'
       : '<button class="btn-sm btn-danger" onclick="startDelete(\'' + esc + '\')">delete</button>';
+    var statusBtn = u.enabled
+      ? '<span class="dot dot-enabled"></span><button class="btn-sm btn-enabled" onclick="toggleEnabled(\'' + esc + '\',' + u.enabled + ')">enabled</button>'
+      : '<span class="dot dot-disabled"></span><button class="btn-sm btn-disabled" onclick="toggleEnabled(\'' + esc + '\',' + u.enabled + ')">disabled</button>';
     rows.push('<tr>' +
       '<td>' + escHtml(u.username) + '</td>' +
       '<td class="dim">' + escHtml(created) + '</td>' +
       '<td>' + portLabel + '</td>' +
       '<td>' + dnsLabel + '</td>' +
+      '<td class="user-status">' + statusBtn + '</td>' +
       '<td class="user-actions">' +
-        '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'port\')">port</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'dns\')">dns</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'password\')">password</button>' +
         delBtn +
       '</td></tr>');
     if (editingUser === u.username) {
       if (editingField === 'dns') rows.push(renderDNSEditRow(u));
-      else if (editingField === 'port') rows.push(renderPortEditRow(u));
       else if (editingField === 'password') rows.push(renderPasswordEditRow(u));
     }
   });
   tbody.innerHTML = rows.join('');
+}
+
+async function toggleEnabled(username, currentlyEnabled) {
+  showUsersError('');
+  var resp = await fetch('/api/users/enabled', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, enabled: !currentlyEnabled})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showUsersError('failed to toggle user'); return; }
+  refreshUsers();
 }
 
 function toggleEdit(username, field) {
@@ -240,7 +215,7 @@ function renderDNSEditRow(u) {
     return '<button class="' + cls + '" onclick="setDNSProto(\'' + esc + '\',\'' + val + '\')">' + label + '</button>';
   }
   return '<tr class="inline-edit-row">' +
-    '<td></td><td></td><td></td>' +
+    '<td></td><td></td><td></td><td></td>' +
     '<td class="inline-edit-cell" colspan="2">' +
       '<div class="inline-edit-form">' +
         '<span class="dns-proto-group">' +
@@ -259,25 +234,10 @@ function renderDNSEditRow(u) {
     '</td></tr>';
 }
 
-function renderPortEditRow(u) {
-  var esc = escAttr(u.username);
-  return '<tr class="inline-edit-row">' +
-    '<td></td><td></td><td></td>' +
-    '<td class="inline-edit-cell" colspan="2">' +
-      '<div class="inline-edit-form">' +
-        '<input type="number" id="port-input-' + esc + '" class="inline-input inline-input-short"' +
-          ' value="' + (u.port || '') + '" placeholder="8081" min="0" max="65535">' +
-        '<button class="btn-sm btn-save" onclick="savePort(\'' + esc + '\')">save</button>' +
-        '<button class="btn-sm" onclick="clearPort(\'' + esc + '\')">clear</button>' +
-        '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
-      '</div>' +
-    '</td></tr>';
-}
-
 function renderPasswordEditRow(u) {
   var esc = escAttr(u.username);
   return '<tr class="inline-edit-row">' +
-    '<td></td><td></td><td></td>' +
+    '<td></td><td></td><td></td><td></td>' +
     '<td class="inline-edit-cell" colspan="2">' +
       '<div class="inline-edit-form">' +
         '<input type="password" id="pw-input-' + esc + '" class="inline-input"' +
@@ -295,7 +255,6 @@ function dnsPlaceholder(proto) {
   return '';
 }
 
-// dnsEditProto tracks the currently selected protocol per user.
 var dnsEditProto = {};
 
 function setDNSProto(username, proto) {
@@ -353,7 +312,11 @@ document.getElementById('add-user-btn').addEventListener('click', async function
   });
   if (resp.status === 401) { window.location.href = '/login'; return; }
   if (resp.status === 409) { showUsersError('user already exists'); return; }
-  if (!resp.ok) { showUsersError('failed to add user'); return; }
+  if (!resp.ok) {
+    var text = await resp.text();
+    showUsersError(text || 'failed to add user');
+    return;
+  }
 
   document.getElementById('new-username').value = '';
   document.getElementById('new-password').value = '';
@@ -374,45 +337,9 @@ async function confirmDelete(username) {
   refreshUsers();
 }
 
-// Re-render without fetching (for delete confirm toggle)
 var cachedUsers = null;
 function renderUsersFromCache() {
   if (cachedUsers) renderUsers(cachedUsers);
-}
-
-async function savePort(username) {
-  var el = document.getElementById('port-input-' + username);
-  var port = parseInt(el.value, 10);
-  if (isNaN(port) || port < 0) { showUsersError('invalid port number'); return; }
-  showUsersError('');
-  var resp = await fetch('/api/users/port', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({username: username, port: port})
-  });
-  if (resp.status === 401) { window.location.href = '/login'; return; }
-  if (!resp.ok) {
-    var text = await resp.text();
-    showUsersError(text || 'failed to update port');
-    return;
-  }
-  editingUser = null;
-  editingField = null;
-  refreshUsers();
-}
-
-async function clearPort(username) {
-  showUsersError('');
-  var resp = await fetch('/api/users/port', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({username: username, port: 0})
-  });
-  if (resp.status === 401) { window.location.href = '/login'; return; }
-  if (!resp.ok) { showUsersError('failed to clear port'); return; }
-  editingUser = null;
-  editingField = null;
-  refreshUsers();
 }
 
 async function savePassword(username) {
@@ -510,7 +437,6 @@ function drawGraph(buckets) {
   var barW = w / buckets.length;
   var pad = 16;
 
-  // Bytes filled area
   ctx.fillStyle = tc.graphFill;
   ctx.strokeStyle = tc.graphStroke;
   ctx.lineWidth = 1;
@@ -526,7 +452,6 @@ function drawGraph(buckets) {
   ctx.lineTo(barW / 2, h);
   ctx.fill();
 
-  // Bytes line
   ctx.beginPath();
   buckets.forEach(function(b, i) {
     var y = h - ((b.br + b.bw) / maxBytes) * (h - pad);
@@ -536,7 +461,6 @@ function drawGraph(buckets) {
   });
   ctx.stroke();
 
-  // Requests line
   ctx.strokeStyle = tc.graphReq;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -548,7 +472,6 @@ function drawGraph(buckets) {
   });
   ctx.stroke();
 
-  // Labels
   ctx.fillStyle = tc.fgDim;
   ctx.font = '10px Inconsolata';
   ctx.fillText('reqs: ' + maxReqs, 4, 11);
@@ -600,12 +523,10 @@ function startLogTail() {
     span.textContent = line + '\n';
     logEl.appendChild(span);
 
-    // Cap at 200 lines
     while (logEl.childNodes.length > 200) {
       logEl.removeChild(logEl.firstChild);
     }
 
-    // Auto-scroll if near bottom
     var atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
     if (atBottom) logEl.scrollTop = logEl.scrollHeight;
   };

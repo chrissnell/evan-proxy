@@ -21,7 +21,7 @@ func setupAPI(t *testing.T) *api {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { users.Close() })
-	if err := users.Add("alice", "secret"); err != nil {
+	if _, err := users.Add("alice", "secret", 8081, 8090); err != nil {
 		t.Fatal(err)
 	}
 
@@ -245,6 +245,9 @@ func (m *mockPortManager) UserPortRange() (int, int) {
 	return m.minPort, m.maxPort
 }
 
+func (m *mockPortManager) StartListener(username string, port int) {}
+func (m *mockPortManager) StopListener(port int)                   {}
+
 func TestHandleUpdatePort_MethodNotAllowed(t *testing.T) {
 	a := setupAPI(t)
 	a.ports = newMockPortManager()
@@ -300,7 +303,7 @@ func TestHandleUpdatePort_PortConflict(t *testing.T) {
 	}
 
 	// Add bob
-	if err := a.users.Add("bob", "secret2"); err != nil {
+	if _, err := a.users.Add("bob", "secret2", 8081, 8090); err != nil {
 		t.Fatal(err)
 	}
 
@@ -351,7 +354,7 @@ func TestHandleUpdatePort_UnknownUser(t *testing.T) {
 		return fmt.Errorf("%w: %q", userdb.ErrUnknownUser, username)
 	}
 	a.ports = pm
-	body := `{"username":"nobody","port":8081}`
+	body := `{"username":"nobody","port":8089}`
 	req := httptest.NewRequest(http.MethodPut, "/api/users/port", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	a.handleUpdatePort(w, req)

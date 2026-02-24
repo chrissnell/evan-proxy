@@ -14,16 +14,6 @@ spec:
   loadBalancerIP: {{ .Values.service.loadBalancerIP }}
   {{- end }}
   ports:
-    - name: proxy-plain
-      port: {{ .Values.service.plainPort }}
-      targetPort: proxy-plain
-      protocol: TCP
-    {{- if .Values.tls.enabled }}
-    - name: proxy-tls
-      port: {{ .Values.service.tlsPort }}
-      targetPort: proxy-tls
-      protocol: TCP
-    {{- end }}
     - name: admin
       port: {{ .Values.service.adminPort }}
       targetPort: admin

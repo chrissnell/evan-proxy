@@ -20,11 +20,10 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics) *Server {
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics) *Server {
 	sessions := NewSessionStore(1 * time.Hour)
 	a := &api{
 		auth:     adminAuth,
-		state:    state,
 		sessions: sessions,
 		stats:    collector,
 		users:    users,
@@ -40,8 +39,6 @@ func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Co
 	// API routes
 	mux.HandleFunc("/api/login", a.handleLogin)
 	mux.HandleFunc("/api/logout", a.handleLogout)
-	mux.HandleFunc("/api/status", a.requireSession(a.handleStatus))
-	mux.HandleFunc("/api/proxy/toggle", a.requireSession(a.handleToggle))
 	mux.HandleFunc("/api/stats/top-sites", a.requireSession(a.handleTopSites))
 	mux.HandleFunc("/api/stats/top-blocked", a.requireSession(a.handleTopBlocked))
 	mux.HandleFunc("/api/stats/traffic", a.requireSession(a.handleTraffic))
@@ -51,6 +48,7 @@ func NewServer(adminAuth *auth.AdminAuth, state *ProxyState, collector *stats.Co
 	mux.HandleFunc("/api/users/port", a.requireSession(a.handleUpdatePort))
 	mux.HandleFunc("/api/users/dns", a.requireSession(a.handleUpdateDNS))
 	mux.HandleFunc("/api/users/dns/test", a.requireSession(a.handleTestDNS))
+	mux.HandleFunc("/api/users/enabled", a.requireSession(a.handleSetEnabled))
 
 	// Prometheus metrics (no auth — standard for scraping)
 	mux.Handle("/metrics", m.Handler())

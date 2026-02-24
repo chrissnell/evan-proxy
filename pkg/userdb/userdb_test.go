@@ -27,10 +27,10 @@ func makeBasicAuth(user, pass string) string {
 func TestAddAndList(t *testing.T) {
 	db := openTestDB(t)
 
-	if err := db.Add("alice", "pass1"); err != nil {
+	if _, err := db.Add("alice", "pass1", 18081, 18090); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Add("bob", "pass2"); err != nil {
+	if _, err := db.Add("bob", "pass2", 18081, 18090); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,10 +49,10 @@ func TestAddAndList(t *testing.T) {
 func TestAddDuplicate(t *testing.T) {
 	db := openTestDB(t)
 
-	if err := db.Add("alice", "pass1"); err != nil {
+	if _, err := db.Add("alice", "pass1", 18081, 18090); err != nil {
 		t.Fatal(err)
 	}
-	err := db.Add("alice", "pass2")
+	_, err := db.Add("alice", "pass2", 18081, 18090)
 	if !errors.Is(err, ErrUserExists) {
 		t.Errorf("expected ErrUserExists, got: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestAddDuplicate(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass1")
+	db.Add("alice", "pass1", 18081, 18090)
 
 	if err := db.Delete("alice"); err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestDeleteUnknown(t *testing.T) {
 
 func TestCheckValid(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "secret")
+	db.Add("alice", "secret", 18081, 18090)
 
 	user, err := db.Check(makeBasicAuth("alice", "secret"))
 	if err != nil {
@@ -96,7 +96,7 @@ func TestCheckValid(t *testing.T) {
 
 func TestCheckWrongPassword(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "secret")
+	db.Add("alice", "secret", 18081, 18090)
 
 	_, err := db.Check(makeBasicAuth("alice", "wrong"))
 	if !errors.Is(err, ErrWrongPassword) {
@@ -106,7 +106,7 @@ func TestCheckWrongPassword(t *testing.T) {
 
 func TestCheckUnknownUser(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "secret")
+	db.Add("alice", "secret", 18081, 18090)
 
 	_, err := db.Check(makeBasicAuth("unknown", "secret"))
 	if !errors.Is(err, ErrUnknownUser) {
@@ -141,7 +141,7 @@ func TestCheckMalformedAuth(t *testing.T) {
 
 func TestCheckCacheHit(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "secret")
+	db.Add("alice", "secret", 18081, 18090)
 
 	// First call populates cache
 	db.Check(makeBasicAuth("alice", "secret"))
@@ -155,7 +155,7 @@ func TestCheckCacheHit(t *testing.T) {
 
 func TestCheckCacheInvalidatedOnDelete(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "secret")
+	db.Add("alice", "secret", 18081, 18090)
 
 	// Populate cache
 	db.Check(makeBasicAuth("alice", "secret"))
@@ -172,7 +172,7 @@ func TestCheckCacheInvalidatedOnDelete(t *testing.T) {
 
 func TestCheckCacheInvalidatedOnPasswordChange(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "secret")
+	db.Add("alice", "secret", 18081, 18090)
 
 	// Populate cache
 	db.Check(makeBasicAuth("alice", "secret"))
@@ -195,7 +195,7 @@ func TestCheckCacheInvalidatedOnPasswordChange(t *testing.T) {
 
 func TestChangePassword(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "old")
+	db.Add("alice", "old", 18081, 18090)
 
 	if err := db.ChangePassword("alice", "new"); err != nil {
 		t.Fatal(err)
@@ -262,7 +262,7 @@ func TestSeedSkippedIfDBHasUsers(t *testing.T) {
 
 	// Create DB with existing user
 	db1, _ := Open(dbPath, "")
-	db1.Add("existing", "pass")
+	db1.Add("existing", "pass", 18081, 18090)
 	db1.Close()
 
 	// Re-open with seed — should NOT import
@@ -324,11 +324,15 @@ func TestMigrationAddsColumns(t *testing.T) {
 		t.Errorf("expected empty DNS fields, got server=%q protocol=%q",
 			users[0].DNSServer, users[0].DNSProtocol)
 	}
+	// Enabled should default to true after migration.
+	if !users[0].Enabled {
+		t.Error("expected enabled=true after migration")
+	}
 }
 
 func TestUpdateDNS(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass")
+	db.Add("alice", "pass", 18081, 18090)
 
 	if err := db.UpdateDNS("alice", "1.1.1.1:853", "tls"); err != nil {
 		t.Fatal(err)
@@ -349,7 +353,7 @@ func TestUpdateDNS(t *testing.T) {
 
 func TestUpdateDNSClear(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass")
+	db.Add("alice", "pass", 18081, 18090)
 	db.UpdateDNS("alice", "1.1.1.1:853", "tls")
 
 	// Clear DNS config.
@@ -374,7 +378,7 @@ func TestUpdateDNSUnknownUser(t *testing.T) {
 
 func TestGetDNSDefault(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass")
+	db.Add("alice", "pass", 18081, 18090)
 
 	server, proto := db.GetDNS("alice")
 	if server != "" || proto != "" {
@@ -384,7 +388,7 @@ func TestGetDNSDefault(t *testing.T) {
 
 func TestDeleteClearsDNSCache(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass")
+	db.Add("alice", "pass", 18081, 18090)
 	db.UpdateDNS("alice", "1.1.1.1:853", "tls")
 
 	db.Delete("alice")
@@ -401,7 +405,7 @@ func TestDNSCacheLoadedOnOpen(t *testing.T) {
 
 	// Create DB and set DNS config.
 	db1, _ := Open(dbPath, "")
-	db1.Add("alice", "pass")
+	db1.Add("alice", "pass", 18081, 18090)
 	db1.UpdateDNS("alice", "https://1.1.1.1/dns-query", "https")
 	db1.Close()
 
@@ -421,23 +425,21 @@ func TestDNSCacheLoadedOnOpen(t *testing.T) {
 
 func TestUpdatePort(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass")
+	db.Add("alice", "pass", 18081, 18090)
 
-	if err := db.UpdatePort("alice", 8081); err != nil {
+	if err := db.UpdatePort("alice", 18085); err != nil {
 		t.Fatal(err)
 	}
 
-	// Verify via List
 	users, _ := db.List()
-	if users[0].Port != 8081 {
-		t.Errorf("expected port 8081, got %d", users[0].Port)
+	if users[0].Port != 18085 {
+		t.Errorf("expected port 18085, got %d", users[0].Port)
 	}
 }
 
 func TestUpdatePortClear(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass")
-	db.UpdatePort("alice", 8081)
+	db.Add("alice", "pass", 18081, 18090)
 
 	if err := db.UpdatePort("alice", 0); err != nil {
 		t.Fatal(err)
@@ -460,12 +462,10 @@ func TestUpdatePortUnknownUser(t *testing.T) {
 
 func TestListPorts(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass")
-	db.Add("bob", "pass")
+	db.Add("alice", "pass", 18081, 18090)
+	db.Add("bob", "pass", 18081, 18090)
 
-	db.UpdatePort("alice", 8081)
-	db.UpdatePort("bob", 8082)
-
+	// Add auto-assigns ports 18081 and 18082
 	ports, err := db.ListPorts()
 	if err != nil {
 		t.Fatal(err)
@@ -473,33 +473,34 @@ func TestListPorts(t *testing.T) {
 	if len(ports) != 2 {
 		t.Fatalf("expected 2 port assignments, got %d", len(ports))
 	}
-	if ports[8081] != "alice" {
-		t.Errorf("port 8081 = %q, want alice", ports[8081])
+	if ports[18081] != "alice" {
+		t.Errorf("port 18081 = %q, want alice", ports[18081])
 	}
-	if ports[8082] != "bob" {
-		t.Errorf("port 8082 = %q, want bob", ports[8082])
+	if ports[18082] != "bob" {
+		t.Errorf("port 18082 = %q, want bob", ports[18082])
 	}
 }
 
-func TestListPortsEmpty(t *testing.T) {
+func TestListPortsAfterClear(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass")
+	db.Add("alice", "pass", 18081, 18090)
+	db.UpdatePort("alice", 0)
 
 	ports, err := db.ListPorts()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ports) != 0 {
-		t.Errorf("expected 0 port assignments, got %d", len(ports))
+		t.Errorf("expected 0 port assignments after clear, got %d", len(ports))
 	}
 }
 
 func TestPortOwner(t *testing.T) {
 	db := openTestDB(t)
-	db.Add("alice", "pass")
-	db.UpdatePort("alice", 8081)
+	db.Add("alice", "pass", 18081, 18090)
 
-	owner, err := db.PortOwner(8081)
+	// Auto-assigned port 18081
+	owner, err := db.PortOwner(18081)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,6 +568,79 @@ func TestMigrationAddsPortColumn(t *testing.T) {
 // openRawDB opens a raw sql.DB for test setup (no migration).
 func openRawDB(path string) (*sql.DB, error) {
 	return sql.Open("sqlite", path+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
+}
+
+func TestAutoAssignPort(t *testing.T) {
+	db := openTestDB(t)
+
+	p1, err := db.Add("alice", "pass", 18081, 18090)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1 != 18081 {
+		t.Errorf("first user port = %d, want 18081", p1)
+	}
+
+	p2, err := db.Add("bob", "pass", 18081, 18090)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p2 != 18082 {
+		t.Errorf("second user port = %d, want 18082", p2)
+	}
+}
+
+func TestAutoAssignPortFull(t *testing.T) {
+	db := openTestDB(t)
+
+	// Fill all 2 ports in a tiny range
+	db.Add("alice", "pass", 18081, 18082)
+	db.Add("bob", "pass", 18081, 18082)
+
+	_, err := db.Add("charlie", "pass", 18081, 18082)
+	if !errors.Is(err, ErrNoPortAvailable) {
+		t.Errorf("expected ErrNoPortAvailable, got: %v", err)
+	}
+}
+
+func TestSetEnabled(t *testing.T) {
+	db := openTestDB(t)
+	db.Add("alice", "pass", 18081, 18090)
+
+	if !db.IsEnabled("alice") {
+		t.Error("new user should be enabled by default")
+	}
+
+	if err := db.SetEnabled("alice", false); err != nil {
+		t.Fatal(err)
+	}
+	if db.IsEnabled("alice") {
+		t.Error("expected disabled after SetEnabled(false)")
+	}
+
+	if err := db.SetEnabled("alice", true); err != nil {
+		t.Fatal(err)
+	}
+	if !db.IsEnabled("alice") {
+		t.Error("expected enabled after SetEnabled(true)")
+	}
+}
+
+func TestSetEnabledUnknownUser(t *testing.T) {
+	db := openTestDB(t)
+
+	err := db.SetEnabled("nobody", false)
+	if !errors.Is(err, ErrUnknownUser) {
+		t.Errorf("expected ErrUnknownUser, got: %v", err)
+	}
+}
+
+func TestIsEnabledUnknownUser(t *testing.T) {
+	db := openTestDB(t)
+
+	if db.IsEnabled("nobody") {
+		t.Error("expected false for unknown user")
+	}
 }
 
 func writeFile(path string, data []byte) error {

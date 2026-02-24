@@ -10,8 +10,6 @@ imagePullSecrets:
 
 # Proxy configuration
 proxy:
-  listenPlain: ":8080"
-  listenTLS: ":443"
   logFormat: "human"
   idleTimeout: "300s"
   httpTimeout: "30s"
@@ -47,27 +45,12 @@ admin:
 # Secret must contain: users.json, ADMIN_USER, ADMIN_PASSWORD
 existingSecret: ""
 
-# TLS configuration
-tls:
-  enabled: false
-  # Use cert-manager to provision certs
-  certManager:
-    enabled: false
-    issuer: letsencrypt-prod
-    issuerKind: ClusterIssuer
-  # Or reference an existing TLS secret
-  existingSecret: ""
-  # Domain for cert-manager Certificate resource
-  domain: ""
-
 # Service
 service:
   type: LoadBalancer
   # Set a specific IP from the MetalLB pool, or leave empty for auto-assign
   loadBalancerIP: ""
   annotations: {}
-  plainPort: 8080
-  tlsPort: 443
   adminPort: 9090
 
 # Resources

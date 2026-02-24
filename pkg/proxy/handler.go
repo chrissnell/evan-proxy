@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"evan-proxy/pkg/acl"
-	"evan-proxy/pkg/admin"
 	"evan-proxy/pkg/config"
 	edns "evan-proxy/pkg/dns"
 	"evan-proxy/pkg/logging"
@@ -43,7 +42,6 @@ type ctxKey int
 
 const (
 	dnsResolverKey ctxKey = iota
-	proxyUserKey          // pre-identified user from per-user port
 )
 
 // authSession tracks a recently authenticated client IP.
@@ -56,13 +54,13 @@ type Handler struct {
 	users           UserChecker
 	dnsGetter       UserDNSGetter
 	portDB          PortLister
+	enabledChecker  UserEnabledChecker
 	acl             acl.ACL
 	limiter         *ratelimit.Limiter
 	logger          *logging.Logger
 	counter         *stats.TrafficCounter
 	transport       *http.Transport
 	dial            func(ctx context.Context, network, address string) (net.Conn, error)
-	state           *admin.ProxyState
 	cfg             *config.Config
 	defaultResolver *edns.Resolver
 
@@ -90,7 +88,7 @@ func isDNSBlocked(ip net.IP) bool {
 	return ip.IsLoopback() || ip.Equal(net.IPv4zero) || loopbackNet.Contains(ip)
 }
 
-func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB PortLister, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, state *admin.ProxyState) *Handler {
+func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB PortLister, enabled UserEnabledChecker, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter) *Handler {
 	defaultResolver, err := edns.New(cfg.DNSProtocol, cfg.DNSServer)
 	if err != nil {
 		panic(fmt.Sprintf("dns resolver: %v", err))
@@ -107,11 +105,11 @@ func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB 
 		users:           users,
 		dnsGetter:       dnsGetter,
 		portDB:          portDB,
+		enabledChecker:  enabled,
 		acl:             a,
 		limiter:         rl,
 		logger:          lg,
 		counter:         tc,
-		state:           state,
 		cfg:             cfg,
 		defaultResolver: defaultResolver,
 		authSessions:    make(map[string]authSession),
@@ -202,24 +200,11 @@ func (h *Handler) checkAuthSession(ip string) string {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !h.state.IsEnabled() {
-		serveDisabled(w, r)
-		return
-	}
-
 	if r.Method == http.MethodConnect {
 		h.handleConnect(w, r)
 	} else {
 		h.handleForward(w, r)
 	}
-}
-
-// userFromCtx returns the pre-identified username from context, or "".
-func userFromCtx(ctx context.Context) string {
-	if u, ok := ctx.Value(proxyUserKey).(string); ok {
-		return u
-	}
-	return ""
 }
 
 // clientAddr extracts the client IP without port.

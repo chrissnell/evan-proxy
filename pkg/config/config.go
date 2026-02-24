@@ -14,14 +14,8 @@ type Config struct {
 	// Optional JSON users file for initial seeding
 	ProxyUsersFile string
 
-	// Listeners
-	ListenPlain string
-	ListenTLS   string
+	// Admin listener
 	AdminListen string
-
-	// TLS
-	TLSCert string
-	TLSKey  string
 
 	// Admin credentials
 	AdminUser     string
@@ -53,11 +47,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		ProxyDBPath:        envOr("PROXY_DB_PATH", "/data/evan-proxy/users.db"),
 		ProxyUsersFile:     os.Getenv("PROXY_USERS_FILE"),
-		ListenPlain:        envOr("LISTEN_PLAIN", ":8080"),
-		ListenTLS:          envOr("LISTEN_TLS", ":443"),
 		AdminListen:        envOr("ADMIN_LISTEN", ":9090"),
-		TLSCert:            os.Getenv("TLS_CERT"),
-		TLSKey:             os.Getenv("TLS_KEY"),
 		AdminUser:          os.Getenv("ADMIN_USER"),
 		AdminPassword:      os.Getenv("ADMIN_PASSWORD"),
 		DNSServer:          os.Getenv("DNS_SERVER"),
@@ -88,9 +78,6 @@ func (c *Config) validate() error {
 	}
 	if c.AdminPassword == "" {
 		return fmt.Errorf("ADMIN_PASSWORD is required (bcrypt hash)")
-	}
-	if (c.TLSCert == "") != (c.TLSKey == "") {
-		return fmt.Errorf("TLS_CERT and TLS_KEY must both be set or both empty")
 	}
 	if c.LogFormat != "json" && c.LogFormat != "human" {
 		return fmt.Errorf("LOG_FORMAT must be 'json' or 'human', got %q", c.LogFormat)

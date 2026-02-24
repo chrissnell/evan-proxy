@@ -66,21 +66,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "evan-proxy.secretName" . }}
                   key: ADMIN_PASSWORD
-            {{- if .Values.tls.enabled }}
-            - name: TLS_CERT
-              value: /etc/evan-proxy/tls/tls.crt
-            - name: TLS_KEY
-              value: /etc/evan-proxy/tls/tls.key
-            {{- end }}
           ports:
-            - name: proxy-plain
-              containerPort: 8080
-              protocol: TCP
-            {{- if .Values.tls.enabled }}
-            - name: proxy-tls
-              containerPort: 443
-              protocol: TCP
-            {{- end }}
             - name: admin
               containerPort: 9090
               protocol: TCP
@@ -93,12 +79,12 @@ spec:
             {{- end }}
           livenessProbe:
             tcpSocket:
-              port: proxy-plain
+              port: admin
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
             tcpSocket:
-              port: proxy-plain
+              port: admin
             initialDelaySeconds: 2
             periodSeconds: 5
           resources:
@@ -118,11 +104,6 @@ spec:
             - name: seed
               mountPath: /etc/evan-proxy
               readOnly: true
-            {{- if .Values.tls.enabled }}
-            - name: tls
-              mountPath: /etc/evan-proxy/tls
-              readOnly: true
-            {{- end }}
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -138,9 +119,3 @@ spec:
             items:
               - key: users.json
                 path: users.json
-        {{- if .Values.tls.enabled }}
-        - name: tls
-          secret:
-            secretName: {{ include "evan-proxy.tlsSecretName" . }}
-            defaultMode: 0400
-        {{- end }}

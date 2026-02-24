@@ -22,23 +22,6 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	clientIP := clientAddr(r)
 	host := r.Host
 
-	// Per-user port: user is already identified by the listening port.
-	// Hijack and tunnel directly — no auth challenge needed.
-	if ctxUser := userFromCtx(r.Context()); ctxUser != "" {
-		hj, ok := w.(http.Hijacker)
-		if !ok {
-			http.Error(w, "hijack not supported", http.StatusInternalServerError)
-			return
-		}
-		conn, bufrw, err := hj.Hijack()
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		h.connectTunnel(conn, bufrw, r.Context(), start, clientIP, host, ctxUser)
-		return
-	}
-
 	// Rate limit check
 	if !h.limiter.Allow(clientIP) {
 		hj, ok := w.(http.Hijacker)

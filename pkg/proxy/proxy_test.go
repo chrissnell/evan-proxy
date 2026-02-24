@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"evan-proxy/pkg/acl"
-	"evan-proxy/pkg/admin"
 	"evan-proxy/pkg/config"
 	edns "evan-proxy/pkg/dns"
 	"evan-proxy/pkg/logging"
@@ -25,7 +24,7 @@ import (
 	"evan-proxy/pkg/userdb"
 )
 
-func setupProxy(t *testing.T) (*Handler, *admin.ProxyState) {
+func setupProxy(t *testing.T) *Handler {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -35,9 +34,6 @@ func setupProxy(t *testing.T) (*Handler, *admin.ProxyState) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { users.Close() })
-	if err := users.Add("alice", "secret"); err != nil {
-		t.Fatal(err)
-	}
 
 	cfg := &config.Config{
 		AuthRetryTimeout:   5 * time.Second,
@@ -45,22 +41,27 @@ func setupProxy(t *testing.T) (*Handler, *admin.ProxyState) {
 		IdleTimeout:        30 * time.Second,
 		HTTPTimeout:        10 * time.Second,
 		DNSProtocol:        "plain",
+		UserPortMin:        18081,
+		UserPortMax:        18090,
 	}
+
+	port, err := users.Add("alice", "secret", cfg.UserPortMin, cfg.UserPortMax)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = port
 
 	limiter := ratelimit.New(10, time.Minute)
 	t.Cleanup(limiter.Stop)
 	logger := logging.New(io.Discard, "human")
-	state := admin.NewProxyState()
 
 	collector := stats.NewCollector()
 	t.Cleanup(collector.Stop)
 	counter := stats.NewTrafficCounter(collector)
 	t.Cleanup(counter.Stop)
 
-	cfg.UserPortMin = 8081
-	cfg.UserPortMax = 8090
-	h := New(cfg, users, users, users, acl.AllowAll{}, limiter, logger, counter, state)
-	return h, state
+	h := New(cfg, users, users, users, users, acl.AllowAll{}, limiter, logger, counter)
+	return h
 }
 
 func basicAuth(user, pass string) string {
@@ -69,17 +70,15 @@ func basicAuth(user, pass string) string {
 
 // TestIOSConnectFlow simulates iOS behavior: CONNECT without auth → 407 → retry with auth on same TCP connection.
 func TestIOSConnectFlow(t *testing.T) {
-	// Start a target server to tunnel to
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("hello from target"))
 	}))
 	defer target.Close()
 
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 	proxySrv := httptest.NewServer(handler)
 	defer proxySrv.Close()
 
-	// Connect raw TCP to proxy
 	conn, err := net.Dial("tcp", proxySrv.Listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +141,7 @@ func TestConnectWithAuthOnFirstRequest(t *testing.T) {
 	}))
 	defer target.Close()
 
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 	proxySrv := httptest.NewServer(handler)
 	defer proxySrv.Close()
 
@@ -169,7 +168,6 @@ func TestConnectWithAuthOnFirstRequest(t *testing.T) {
 // TestPlainHTTPForward tests plain HTTP forwarding with auth.
 func TestPlainHTTPForward(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify hop-by-hop headers are stripped
 		if r.Header.Get("Proxy-Authorization") != "" {
 			t.Error("Proxy-Authorization should be stripped")
 		}
@@ -184,7 +182,7 @@ func TestPlainHTTPForward(t *testing.T) {
 	}))
 	defer target.Close()
 
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 
 	req := httptest.NewRequest("GET", target.URL+"/path", nil)
 	req.Header.Set("Proxy-Authorization", basicAuth("alice", "secret"))
@@ -206,7 +204,7 @@ func TestPlainHTTPForward(t *testing.T) {
 
 // TestPlainHTTPNoAuth tests that unauthenticated plain HTTP gets 407.
 func TestPlainHTTPNoAuth(t *testing.T) {
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 
 	req := httptest.NewRequest("GET", "http://example.com/", nil)
 	w := httptest.NewRecorder()
@@ -217,24 +215,6 @@ func TestPlainHTTPNoAuth(t *testing.T) {
 	}
 	if w.Header().Get("Proxy-Authenticate") == "" {
 		t.Error("missing Proxy-Authenticate on 407")
-	}
-}
-
-// TestDisabledState tests that disabled proxy returns the disabled page.
-func TestDisabledState(t *testing.T) {
-	handler, state := setupProxy(t)
-	state.SetEnabled(false)
-
-	req := httptest.NewRequest("GET", "http://example.com/", nil)
-	req.Header.Set("Proxy-Authorization", basicAuth("alice", "secret"))
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "PROXY DISABLED") {
-		t.Error("expected disabled page content")
 	}
 }
 
@@ -259,9 +239,9 @@ func TestIsDNSBlocked(t *testing.T) {
 	}
 }
 
-// TestDNSBlockForward tests that DNS-blocked hosts log "dns-block" event for plain HTTP.
+// TestDNSBlockForward tests that DNS-blocked hosts are rejected for plain HTTP.
 func TestDNSBlockForward(t *testing.T) {
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 
 	var logBuf bytes.Buffer
 	handler.logger = logging.New(&logBuf, "human")
@@ -272,13 +252,10 @@ func TestDNSBlockForward(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	// Should get 502 or 523 — either way not 200
 	if w.Code == 200 {
 		t.Fatal("expected non-200 for blocked domain")
 	}
 
-	// The transport will fail because blocked.example.com doesn't resolve.
-	// This test mainly verifies no panics and the code path works.
 	logOut := logBuf.String()
 	if logOut == "" {
 		t.Error("expected log output")
@@ -287,7 +264,7 @@ func TestDNSBlockForward(t *testing.T) {
 
 // TestResolverFromCtxDefault tests that resolverFromCtx returns the default when no context value.
 func TestResolverFromCtxDefault(t *testing.T) {
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 
 	ctx := context.Background()
 	r := handler.resolverFromCtx(ctx)
@@ -298,7 +275,7 @@ func TestResolverFromCtxDefault(t *testing.T) {
 
 // TestResolverFromCtxOverride tests that resolverFromCtx returns the context resolver.
 func TestResolverFromCtxOverride(t *testing.T) {
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 
 	customResolver, _ := edns.New("plain", "8.8.8.8:53")
 	ctx := context.WithValue(context.Background(), dnsResolverKey, customResolver)
@@ -311,12 +288,11 @@ func TestResolverFromCtxOverride(t *testing.T) {
 
 // TestCtxWithUserDNSNoConfig tests ctxWithUserDNS returns unmodified context for user without DNS.
 func TestCtxWithUserDNSNoConfig(t *testing.T) {
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 
 	ctx := context.Background()
 	got := handler.ctxWithUserDNS(ctx, "alice")
 
-	// No DNS configured for alice, so context should be unchanged.
 	if got.Value(dnsResolverKey) != nil {
 		t.Error("expected no resolver in context for user without DNS config")
 	}
@@ -336,7 +312,7 @@ func (m *mockDNSGetter) GetDNS(username string) (string, string) {
 
 // TestCtxWithUserDNSConfigured tests ctxWithUserDNS injects resolver for user with DNS config.
 func TestCtxWithUserDNSConfigured(t *testing.T) {
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 	handler.dnsGetter = &mockDNSGetter{
 		configs: map[string][2]string{
 			"alice": {"8.8.8.8:53", "plain"},
@@ -352,7 +328,7 @@ func TestCtxWithUserDNSConfigured(t *testing.T) {
 
 // TestCtxWithUserDNSNilGetter tests ctxWithUserDNS gracefully handles nil dnsGetter.
 func TestCtxWithUserDNSNilGetter(t *testing.T) {
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 	handler.dnsGetter = nil
 
 	ctx := handler.ctxWithUserDNS(context.Background(), "alice")
@@ -361,21 +337,60 @@ func TestCtxWithUserDNSNilGetter(t *testing.T) {
 	}
 }
 
-// TestPerUserPortConnect tests that CONNECT on a per-user port skips auth entirely.
-func TestPerUserPortConnect(t *testing.T) {
+// TestPerUserPortAuthRequired tests that CONNECT on a per-user port requires auth (407 without creds).
+func TestPerUserPortAuthRequired(t *testing.T) {
+	handler := setupProxy(t)
+	proxySrv := httptest.NewServer(handler)
+	defer proxySrv.Close()
+
+	conn, err := net.Dial("tcp", proxySrv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	// CONNECT without credentials
+	fmt.Fprintf(conn, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("reading response: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 407 {
+		t.Fatalf("expected 407 for unauthenticated CONNECT, got %d", resp.StatusCode)
+	}
+	if resp.Header.Get("Proxy-Authenticate") == "" {
+		t.Error("missing Proxy-Authenticate header on 407")
+	}
+}
+
+// TestPerUserPortForwardAuthRequired tests that plain HTTP on a per-user port requires auth.
+func TestPerUserPortForwardAuthRequired(t *testing.T) {
+	handler := setupProxy(t)
+
+	req := httptest.NewRequest("GET", "http://example.com/", nil)
+	// No Proxy-Authorization header
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != 407 {
+		t.Fatalf("expected 407 for unauthenticated forward, got %d", w.Code)
+	}
+}
+
+// TestPerUserPortConnectWithAuth tests CONNECT succeeds with valid credentials.
+func TestPerUserPortConnectWithAuth(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("tunneled"))
 	}))
 	defer target.Close()
 
-	handler, _ := setupProxy(t)
-
-	// Wrap handler with context injection simulating a per-user port listener
-	userHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(r.Context(), proxyUserKey, "alice")
-		handler.ServeHTTP(w, r.WithContext(ctx))
-	})
-	proxySrv := httptest.NewServer(userHandler)
+	handler := setupProxy(t)
+	proxySrv := httptest.NewServer(handler)
 	defer proxySrv.Close()
 
 	conn, err := net.Dial("tcp", proxySrv.Listener.Addr().String())
@@ -386,8 +401,9 @@ func TestPerUserPortConnect(t *testing.T) {
 
 	targetAddr := strings.TrimPrefix(target.URL, "http://")
 
-	// CONNECT without any credentials — should succeed directly
-	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", targetAddr, targetAddr)
+	// CONNECT with valid credentials
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: %s\r\n\r\n",
+		targetAddr, targetAddr, basicAuth("alice", "secret"))
 
 	reader := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(reader, nil)
@@ -396,10 +412,10 @@ func TestPerUserPortConnect(t *testing.T) {
 	}
 
 	if resp.StatusCode != 200 {
-		t.Fatalf("expected 200 (no auth needed on per-user port), got %d", resp.StatusCode)
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	// Send a request through the tunnel
+	// Verify tunnel works
 	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", targetAddr)
 	tunnelResp, err := http.ReadResponse(reader, nil)
 	if err != nil {
@@ -413,93 +429,37 @@ func TestPerUserPortConnect(t *testing.T) {
 	}
 }
 
-// TestPerUserPortForward tests that plain HTTP on a per-user port skips auth.
-func TestPerUserPortForward(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("forwarded-no-auth"))
-	}))
-	defer target.Close()
+// TestPerUserPortBadCredentials tests that invalid credentials are rejected.
+func TestPerUserPortBadCredentials(t *testing.T) {
+	handler := setupProxy(t)
+	proxySrv := httptest.NewServer(handler)
+	defer proxySrv.Close()
 
-	handler, _ := setupProxy(t)
-
-	// Simulate per-user port by injecting username in context
-	req := httptest.NewRequest("GET", target.URL+"/path", nil)
-	req = req.WithContext(context.WithValue(req.Context(), proxyUserKey, "alice"))
-	// No Proxy-Authorization header
-
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != 200 {
-		t.Fatalf("expected 200 (no auth needed on per-user port), got %d", w.Code)
+	conn, err := net.Dial("tcp", proxySrv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if w.Body.String() != "forwarded-no-auth" {
-		t.Errorf("body = %q, want 'forwarded-no-auth'", w.Body.String())
+	defer conn.Close()
+
+	// CONNECT with wrong password
+	fmt.Fprintf(conn, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\nProxy-Authorization: %s\r\n\r\n",
+		basicAuth("alice", "wrongpassword"))
+
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("reading response: %v", err)
 	}
-}
+	resp.Body.Close()
 
-// TestPerUserPortCorrectAttribution verifies two users on different per-user ports
-// get correctly attributed in logs even from the same client IP.
-func TestPerUserPortCorrectAttribution(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
-	}))
-	defer target.Close()
-
-	handler, _ := setupProxy(t)
-
-	// Add a second user
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "users2.db")
-	_ = dbPath // not needed; alice is already in the handler's DB
-
-	var logBuf bytes.Buffer
-	handler.logger = logging.New(&logBuf, "human")
-
-	// Request as "alice" via per-user port context
-	req1 := httptest.NewRequest("GET", target.URL+"/alice-page", nil)
-	req1 = req1.WithContext(context.WithValue(req1.Context(), proxyUserKey, "alice"))
-	w1 := httptest.NewRecorder()
-	handler.ServeHTTP(w1, req1)
-	if w1.Code != 200 {
-		t.Fatalf("alice request: expected 200, got %d", w1.Code)
-	}
-
-	// Request as "bob" via per-user port context
-	req2 := httptest.NewRequest("GET", target.URL+"/bob-page", nil)
-	req2 = req2.WithContext(context.WithValue(req2.Context(), proxyUserKey, "bob"))
-	w2 := httptest.NewRecorder()
-	handler.ServeHTTP(w2, req2)
-	if w2.Code != 200 {
-		t.Fatalf("bob request: expected 200, got %d", w2.Code)
-	}
-
-	logOut := logBuf.String()
-	if !strings.Contains(logOut, "alice") {
-		t.Error("expected 'alice' in log output")
-	}
-	if !strings.Contains(logOut, "bob") {
-		t.Error("expected 'bob' in log output")
-	}
-}
-
-// TestUserFromCtx tests the context helper for per-user port identification.
-func TestUserFromCtx(t *testing.T) {
-	// No value set
-	if got := userFromCtx(context.Background()); got != "" {
-		t.Errorf("expected empty, got %q", got)
-	}
-
-	// Value set
-	ctx := context.WithValue(context.Background(), proxyUserKey, "evan")
-	if got := userFromCtx(ctx); got != "evan" {
-		t.Errorf("expected 'evan', got %q", got)
+	if resp.StatusCode != 407 {
+		t.Fatalf("expected 407 for bad credentials, got %d", resp.StatusCode)
 	}
 }
 
 // TestCtxWithUserDNSInvalidProtocol tests ctxWithUserDNS handles invalid protocol gracefully.
 func TestCtxWithUserDNSInvalidProtocol(t *testing.T) {
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 	handler.dnsGetter = &mockDNSGetter{
 		configs: map[string][2]string{
 			"alice": {"1.1.1.1", "invalid"},
@@ -519,7 +479,7 @@ func TestForwardWithPerUserDNS(t *testing.T) {
 	}))
 	defer target.Close()
 
-	handler, _ := setupProxy(t)
+	handler := setupProxy(t)
 	handler.dnsGetter = &mockDNSGetter{
 		configs: map[string][2]string{
 			"alice": {"8.8.8.8:53", "plain"},

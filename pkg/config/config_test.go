@@ -28,12 +28,6 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.ListenPlain != ":8080" {
-		t.Errorf("ListenPlain = %q, want :8080", cfg.ListenPlain)
-	}
-	if cfg.ListenTLS != ":443" {
-		t.Errorf("ListenTLS = %q, want :443", cfg.ListenTLS)
-	}
 	if cfg.AdminListen != ":9090" {
 		t.Errorf("AdminListen = %q, want :9090", cfg.AdminListen)
 	}
@@ -42,6 +36,12 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.AuthRetryTimeout != 5*time.Second {
 		t.Errorf("AuthRetryTimeout = %v, want 5s", cfg.AuthRetryTimeout)
+	}
+	if cfg.UserPortMin != 8081 {
+		t.Errorf("UserPortMin = %d, want 8081", cfg.UserPortMin)
+	}
+	if cfg.UserPortMax != 8090 {
+		t.Errorf("UserPortMax = %d, want 8090", cfg.UserPortMax)
 	}
 }
 
@@ -67,16 +67,6 @@ func TestLoadMissingAdminPassword(t *testing.T) {
 	}
 }
 
-func TestLoadTLSMismatch(t *testing.T) {
-	env := validEnv()
-	env["TLS_CERT"] = "/tmp/cert.pem"
-	setEnv(t, env)
-	_, err := Load()
-	if err == nil {
-		t.Fatal("expected error for TLS_CERT without TLS_KEY")
-	}
-}
-
 func TestLoadInvalidLogFormat(t *testing.T) {
 	env := validEnv()
 	env["LOG_FORMAT"] = "xml"
@@ -89,7 +79,6 @@ func TestLoadInvalidLogFormat(t *testing.T) {
 
 func TestLoadCustomValues(t *testing.T) {
 	env := validEnv()
-	env["LISTEN_PLAIN"] = ":9999"
 	env["DNS_SERVER"] = "1.1.1.1:53"
 	env["AUTH_FAIL_RATE_LIMIT"] = "10"
 	env["AUTH_FAIL_WINDOW"] = "120s"
@@ -98,9 +87,6 @@ func TestLoadCustomValues(t *testing.T) {
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.ListenPlain != ":9999" {
-		t.Errorf("ListenPlain = %q, want :9999", cfg.ListenPlain)
 	}
 	if cfg.DNSServer != "1.1.1.1:53" {
 		t.Errorf("DNSServer = %q, want 1.1.1.1:53", cfg.DNSServer)

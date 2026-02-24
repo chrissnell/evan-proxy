@@ -8,10 +8,13 @@ import (
 	"time"
 )
 
+// UserEnabledChecker returns whether a user is enabled.
+type UserEnabledChecker interface {
+	IsEnabled(username string) bool
+}
+
 // StartUserListeners loads port assignments from the DB and starts a
-// dedicated HTTP listener for each. Requests arriving on a per-user port
-// have the username injected into the request context so the auth flow
-// can skip the 407 challenge.
+// dedicated HTTP listener for each enabled user.
 func (h *Handler) StartUserListeners() error {
 	ports, err := h.portDB.ListPorts()
 	if err != nil {
@@ -26,6 +29,10 @@ func (h *Handler) StartUserListeners() error {
 			log.Printf("userports: ignoring out-of-range port %d for %q", port, username)
 			continue
 		}
+		if !h.enabledChecker.IsEnabled(username) {
+			log.Printf("userports: skipping disabled user %q (port %d)", username, port)
+			continue
+		}
 		h.portUsers[port] = username
 		h.startListenerLocked(port, username)
 	}
@@ -38,8 +45,7 @@ func (h *Handler) startListenerLocked(port int, username string) {
 		Addr:        fmt.Sprintf(":%d", port),
 		IdleTimeout: h.cfg.IdleTimeout,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), proxyUserKey, username)
-			h.ServeHTTP(w, r.WithContext(ctx))
+			h.ServeHTTP(w, r)
 		}),
 	}
 
@@ -69,6 +75,19 @@ func (h *Handler) StopUserListener(port int) {
 		srv.Shutdown(ctx)
 		log.Printf("userports: stopped listener on :%d", port)
 	}
+}
+
+// StartListener starts a listener for a user on a specific port (without DB changes).
+func (h *Handler) StartListener(username string, port int) {
+	h.portMu.Lock()
+	h.portUsers[port] = username
+	h.startListenerLocked(port, username)
+	h.portMu.Unlock()
+}
+
+// StopListener stops a listener on a specific port (without DB changes).
+func (h *Handler) StopListener(port int) {
+	h.StopUserListener(port)
 }
 
 // UpdateUserPort assigns a port to a user, starting/stopping listeners as needed.

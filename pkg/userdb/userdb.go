@@ -49,6 +49,7 @@ type UserInfo struct {
 	DNSServer   string `json:"dns_server"`
 	DNSProtocol string `json:"dns_protocol"`
 	Port        int    `json:"port"`
+	Enabled     bool   `json:"enabled"`
 }
 
 type DNSEntry struct {
@@ -159,6 +160,12 @@ func (d *DB) migrate() error {
 		}
 		log.Println("userdb: migrated — added port column")
 	}
+	if !cols["enabled"] {
+		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"); err != nil {
+			return fmt.Errorf("adding enabled column: %w", err)
+		}
+		log.Println("userdb: migrated — added enabled column")
+	}
 	return nil
 }
 
@@ -219,25 +226,88 @@ func (d *DB) UpdateDNS(username, server, protocol string) error {
 	return nil
 }
 
-// Add creates a new user with an argon2id-hashed password.
-func (d *DB) Add(username, password string) error {
+// ErrNoPortAvailable is returned when all ports in the range are assigned.
+var ErrNoPortAvailable = errors.New("no port available")
+
+// Add creates a new user with an argon2id-hashed password and auto-assigns a port.
+func (d *DB) Add(username, password string, portMin, portMax int) (int, error) {
 	if username == "" || password == "" {
-		return fmt.Errorf("username and password must not be empty")
+		return 0, fmt.Errorf("username and password must not be empty")
 	}
 
 	hash, err := hashPassword(password)
 	if err != nil {
-		return fmt.Errorf("hashing password: %w", err)
+		return 0, fmt.Errorf("hashing password: %w", err)
 	}
 
-	_, err = d.db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", username, hash)
+	port, err := d.nextAvailablePort(portMin, portMax)
+	if err != nil {
+		return 0, err
+	}
+
+	_, err = d.db.Exec("INSERT INTO users (username, password_hash, port) VALUES (?, ?, ?)", username, hash, port)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
-			return fmt.Errorf("%w: %q", ErrUserExists, username)
+			return 0, fmt.Errorf("%w: %q", ErrUserExists, username)
 		}
-		return fmt.Errorf("inserting user: %w", err)
+		return 0, fmt.Errorf("inserting user: %w", err)
+	}
+	return port, nil
+}
+
+// nextAvailablePort finds the first unused port in [min, max].
+func (d *DB) nextAvailablePort(min, max int) (int, error) {
+	rows, err := d.db.Query("SELECT port FROM users WHERE port >= ? AND port <= ? ORDER BY port", min, max)
+	if err != nil {
+		return 0, fmt.Errorf("querying ports: %w", err)
+	}
+	defer rows.Close()
+
+	used := make(map[int]bool)
+	for rows.Next() {
+		var p int
+		if err := rows.Scan(&p); err != nil {
+			return 0, err
+		}
+		used[p] = true
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	for p := min; p <= max; p++ {
+		if !used[p] {
+			return p, nil
+		}
+	}
+	return 0, ErrNoPortAvailable
+}
+
+// SetEnabled enables or disables a user.
+func (d *DB) SetEnabled(username string, enabled bool) error {
+	val := 0
+	if enabled {
+		val = 1
+	}
+	res, err := d.db.Exec("UPDATE users SET enabled = ? WHERE username = ?", val, username)
+	if err != nil {
+		return fmt.Errorf("updating enabled: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("%w: %q", ErrUnknownUser, username)
 	}
 	return nil
+}
+
+// IsEnabled returns whether a user is enabled. Returns false for unknown users.
+func (d *DB) IsEnabled(username string) bool {
+	var enabled int
+	err := d.db.QueryRow("SELECT enabled FROM users WHERE username = ?", username).Scan(&enabled)
+	if err != nil {
+		return false
+	}
+	return enabled != 0
 }
 
 // Delete removes a user and invalidates their auth cache.
@@ -291,7 +361,7 @@ func (d *DB) ChangePassword(username, newPassword string) error {
 
 // List returns all usernames and their creation times.
 func (d *DB) List() ([]UserInfo, error) {
-	rows, err := d.db.Query("SELECT username, created_at, dns_server, dns_protocol, port FROM users ORDER BY username")
+	rows, err := d.db.Query("SELECT username, created_at, dns_server, dns_protocol, port, enabled FROM users ORDER BY username")
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)
 	}
@@ -300,9 +370,11 @@ func (d *DB) List() ([]UserInfo, error) {
 	var users []UserInfo
 	for rows.Next() {
 		var u UserInfo
-		if err := rows.Scan(&u.Username, &u.CreatedAt, &u.DNSServer, &u.DNSProtocol, &u.Port); err != nil {
+		var enabled int
+		if err := rows.Scan(&u.Username, &u.CreatedAt, &u.DNSServer, &u.DNSProtocol, &u.Port, &enabled); err != nil {
 			return nil, fmt.Errorf("scanning user: %w", err)
 		}
+		u.Enabled = enabled != 0
 		users = append(users, u)
 	}
 	return users, rows.Err()
@@ -443,7 +515,12 @@ func (d *DB) seedFromFile(path string) error {
 		if u.Username == "" || u.Password == "" {
 			continue
 		}
-		if err := d.Add(u.Username, u.Password); err != nil {
+		// Seed users get port 0 — ports are assigned via the admin UI
+		hash, err := hashPassword(u.Password)
+		if err != nil {
+			return fmt.Errorf("hashing password for %q: %w", u.Username, err)
+		}
+		if _, err := d.db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", u.Username, hash); err != nil {
 			return fmt.Errorf("seeding user %q: %w", u.Username, err)
 		}
 		log.Printf("userdb: seeded user %q from %s", u.Username, path)

@@ -21,11 +21,12 @@ import (
 type PortManager interface {
 	UpdateUserPort(username string, port int) error
 	UserPortRange() (min, max int)
+	StartListener(username string, port int)
+	StopListener(port int)
 }
 
 type api struct {
 	auth     *auth.AdminAuth
-	state    *ProxyState
 	sessions *SessionStore
 	stats    *stats.Collector
 	users    *userdb.DB
@@ -35,10 +36,6 @@ type api struct {
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
-}
-
-type statusResponse struct {
-	Enabled bool `json:"enabled"`
 }
 
 func (a *api) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -98,27 +95,6 @@ func (a *api) handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 	})
 	w.WriteHeader(http.StatusOK)
-}
-
-func (a *api) handleStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(statusResponse{Enabled: a.state.IsEnabled()})
-}
-
-func (a *api) handleToggle(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-
-	newState := a.state.Toggle()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(statusResponse{Enabled: newState})
 }
 
 // requireSession wraps a handler with session authentication.
@@ -183,15 +159,27 @@ func (a *api) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.users.Add(req.Username, req.Password); err != nil {
+	min, max := a.ports.UserPortRange()
+	port, err := a.users.Add(req.Username, req.Password, min, max)
+	if err != nil {
 		if errors.Is(err, userdb.ErrUserExists) {
 			http.Error(w, "user already exists", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, userdb.ErrNoPortAvailable) {
+			http.Error(w, "no ports available", http.StatusConflict)
 			return
 		}
 		log.Printf("create user: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	// Start the per-user port listener
+	if err := a.ports.UpdateUserPort(req.Username, port); err != nil {
+		log.Printf("start user listener: %v", err)
+	}
+
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -200,6 +188,15 @@ func (a *api) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if username == "" {
 		http.Error(w, "username required", http.StatusBadRequest)
 		return
+	}
+
+	// Stop the user's port listener before deleting
+	users, _ := a.users.List()
+	for _, u := range users {
+		if u.Username == username && u.Port > 0 {
+			a.ports.UpdateUserPort(username, 0)
+			break
+		}
 	}
 
 	if err := a.users.Delete(username); err != nil {
@@ -292,6 +289,53 @@ func (a *api) handleUpdatePort(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	w.WriteHeader(http.StatusOK)
+}
+
+type enabledRequest struct {
+	Username string `json:"username"`
+	Enabled  bool   `json:"enabled"`
+}
+
+func (a *api) handleSetEnabled(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req enabledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.Username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	if err := a.users.SetEnabled(req.Username, req.Enabled); err != nil {
+		if errors.Is(err, userdb.ErrUnknownUser) {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("set enabled: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Start or stop the port listener without changing the DB port assignment
+	users, _ := a.users.List()
+	for _, u := range users {
+		if u.Username == req.Username && u.Port > 0 {
+			if req.Enabled {
+				a.ports.StartListener(req.Username, u.Port)
+			} else {
+				a.ports.StopListener(u.Port)
+			}
+			break
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 

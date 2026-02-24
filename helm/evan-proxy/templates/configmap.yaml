@@ -5,8 +5,6 @@ metadata:
   labels:
     {{- include "evan-proxy.labels" . | nindent 4 }}
 data:
-  LISTEN_PLAIN: {{ .Values.proxy.listenPlain | quote }}
-  LISTEN_TLS: {{ .Values.proxy.listenTLS | quote }}
   ADMIN_LISTEN: {{ .Values.admin.listen | quote }}
   LOG_FORMAT: {{ .Values.proxy.logFormat | quote }}
   IDLE_TIMEOUT: {{ .Values.proxy.idleTimeout | quote }}

@@ -485,6 +485,12 @@ button:hover {
   border-color: var(--danger);
 }
 
+.user-status { white-space: nowrap; }
+.user-status .dot { margin-right: 0.25rem; }
+
+.btn-enabled { color: var(--accent); border-color: var(--accent); }
+.btn-disabled { color: var(--danger); border-color: var(--danger); }
+
 .dns-test-ok { color: var(--accent); font-size: 0.85rem; }
 .dns-test-fail { color: var(--danger); font-size: 0.85rem; }
 .dns-test-pending { color: var(--fg-dim); font-size: 0.72rem; }

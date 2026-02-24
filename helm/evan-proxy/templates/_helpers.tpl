@@ -36,14 +36,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
-{{- define "evan-proxy.tlsSecretName" -}}
-{{- if .Values.tls.existingSecret }}
-{{- .Values.tls.existingSecret }}
-{{- else }}
-{{- printf "%s-tls" (include "evan-proxy.fullname" .) }}
-{{- end }}
-{{- end }}
-
 {{- define "evan-proxy.imageTag" -}}
 {{- default .Chart.AppVersion .Values.image.tag }}
 {{- end }}
