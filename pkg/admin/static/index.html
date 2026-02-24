@@ -161,12 +161,14 @@ function renderUsers(users) {
       '<td>' + dnsLabel + '</td>' +
       '<td class="user-status">' + statusBtn + '</td>' +
       '<td class="user-actions">' +
+        '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'port\')">port</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'dns\')">dns</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'password\')">password</button>' +
         delBtn +
       '</td></tr>');
     if (editingUser === u.username) {
-      if (editingField === 'dns') rows.push(renderDNSEditRow(u));
+      if (editingField === 'port') rows.push(renderPortEditRow(u));
+      else if (editingField === 'dns') rows.push(renderDNSEditRow(u));
       else if (editingField === 'password') rows.push(renderPasswordEditRow(u));
     }
   });
@@ -229,6 +231,20 @@ function renderDNSEditRow(u) {
           (proto === '' ? ' disabled' : '') + '>test</button>' +
         '<span id="dns-result-' + esc + '"></span>' +
         '<button class="btn-sm btn-save" onclick="saveDNS(\'' + esc + '\')">save</button>' +
+        '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+      '</div>' +
+    '</td></tr>';
+}
+
+function renderPortEditRow(u) {
+  var esc = escAttr(u.username);
+  return '<tr class="inline-edit-row">' +
+    '<td></td><td></td><td></td><td></td>' +
+    '<td class="inline-edit-cell" colspan="2">' +
+      '<div class="inline-edit-form">' +
+        '<input type="number" id="port-input-' + esc + '" class="inline-input inline-input-short"' +
+          ' value="' + (u.port || '') + '" placeholder="port">' +
+        '<button class="btn-sm btn-save" onclick="savePort(\'' + esc + '\')">save</button>' +
         '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
       '</div>' +
     '</td></tr>';
@@ -340,6 +356,29 @@ async function confirmDelete(username) {
 var cachedUsers = null;
 function renderUsersFromCache() {
   if (cachedUsers) renderUsers(cachedUsers);
+}
+
+async function savePort(username) {
+  var el = document.getElementById('port-input-' + username);
+  var val = el.value.trim();
+  if (val === '') { showUsersError('port number required'); return; }
+  var port = parseInt(val, 10);
+  if (isNaN(port) || port < 0) { showUsersError('invalid port number'); return; }
+  showUsersError('');
+  var resp = await fetch('/api/users/port', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, port: port})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) {
+    var text = await resp.text();
+    showUsersError(text || 'failed to update port');
+    return;
+  }
+  editingUser = null;
+  editingField = null;
+  refreshUsers();
 }
 
 async function savePassword(username) {
