@@ -416,32 +416,50 @@ button:hover {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.dns-edit-cell {
-  text-align: right;
-}
+.dns-edit-cell { text-align: right; }
 
 .dns-edit-form {
   display: inline-flex;
-  gap: 0.35rem;
+  gap: 0.25rem;
   align-items: center;
 }
 
-.dns-select,
+.dns-proto-group {
+  display: inline-flex;
+  gap: 0;
+}
+
+.dns-proto-group .btn-sm {
+  border-radius: 0;
+  margin-left: -1px;
+}
+
+.dns-proto-group .btn-sm:first-child {
+  border-radius: 2px 0 0 2px;
+  margin-left: 0;
+}
+
+.dns-proto-group .btn-sm:last-child {
+  border-radius: 0 2px 2px 0;
+}
+
+.btn-sm.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
 .dns-input {
   font-family: inherit;
   font-size: 0.72rem;
   border: 1px solid var(--btn-border);
   background: var(--bg-input);
   color: var(--fg);
-  padding: 0.2rem 0.4rem;
+  padding: 0.2rem 0.5rem;
   border-radius: 2px;
-  height: 1.7em;
-  box-sizing: content-box;
+  width: 14em;
   margin: 0;
 }
-
-.dns-select { cursor: pointer; }
-.dns-input { width: 14em; }
 
 .dns-input:focus { border-color: var(--accent); outline: none; }
 .dns-input:disabled { opacity: 0.4; }
