@@ -1,13 +1,24 @@
 package admin
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
 
+func newTestSessionStore(t *testing.T, ttl time.Duration) *SessionStore {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "sessions.db")
+	ss, err := NewSessionStore(dbPath, ttl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ss.Stop() })
+	return ss
+}
+
 func TestCreateAndValidate(t *testing.T) {
-	ss := NewSessionStore(time.Hour)
-	defer ss.Stop()
+	ss := newTestSessionStore(t, time.Hour)
 
 	token := ss.Create()
 	if token == "" {
@@ -19,8 +30,7 @@ func TestCreateAndValidate(t *testing.T) {
 }
 
 func TestInvalidToken(t *testing.T) {
-	ss := NewSessionStore(time.Hour)
-	defer ss.Stop()
+	ss := newTestSessionStore(t, time.Hour)
 
 	if ss.Validate("nonexistent") {
 		t.Error("expected unknown token to fail validation")
@@ -28,8 +38,7 @@ func TestInvalidToken(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	ss := NewSessionStore(time.Hour)
-	defer ss.Stop()
+	ss := newTestSessionStore(t, time.Hour)
 
 	token := ss.Create()
 	ss.Delete(token)
@@ -39,8 +48,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestExpiredSession(t *testing.T) {
-	ss := NewSessionStore(10 * time.Millisecond)
-	defer ss.Stop()
+	ss := newTestSessionStore(t, 10*time.Millisecond)
 
 	token := ss.Create()
 	time.Sleep(20 * time.Millisecond)
@@ -50,8 +58,7 @@ func TestExpiredSession(t *testing.T) {
 }
 
 func TestMultipleSessions(t *testing.T) {
-	ss := NewSessionStore(time.Hour)
-	defer ss.Stop()
+	ss := newTestSessionStore(t, time.Hour)
 
 	t1 := ss.Create()
 	t2 := ss.Create()

@@ -20,8 +20,11 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics) *Server {
-	sessions := NewSessionStore(1 * time.Hour)
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, dbPath string) (*Server, error) {
+	sessions, err := NewSessionStore(dbPath, 24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
 	a := &api{
 		auth:     adminAuth,
 		sessions: sessions,
@@ -57,7 +60,7 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 	mux.HandleFunc("/login", serveFile("static/login.html"))
 	mux.HandleFunc("/", a.requireSessionPage(serveFile("static/index.html")))
 
-	return &Server{mux: mux}
+	return &Server{mux: mux}, nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

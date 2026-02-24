@@ -72,7 +72,7 @@ func (a *api) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   3600,
+		MaxAge:   86400,
 	})
 	w.WriteHeader(http.StatusOK)
 }

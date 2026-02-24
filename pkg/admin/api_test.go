@@ -25,8 +25,14 @@ func setupAPI(t *testing.T) *api {
 		t.Fatal(err)
 	}
 
+	sessions, err := NewSessionStore(filepath.Join(dir, "sessions.db"), 1*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sessions.Stop() })
+
 	return &api{
-		sessions: NewSessionStore(1 * time.Hour),
+		sessions: sessions,
 		users:    users,
 	}
 }
