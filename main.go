@@ -81,6 +81,7 @@ func main() {
 	defer cancel()
 
 	proxyHandler.ShutdownUserListeners(ctx)
+	proxyHandler.StopAuthCleanup()
 	adminSrv.Shutdown(ctx)
 	counter.Stop()
 	collector.Stop()

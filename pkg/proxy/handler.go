@@ -70,6 +70,7 @@ type Handler struct {
 	// iOS/macOS which may not retry CONNECT auth for subresource requests.
 	authMu       sync.RWMutex
 	authSessions map[string]authSession
+	authStopCh   chan struct{}
 
 	// Per-user dedicated port listeners
 	portMu      sync.RWMutex
@@ -114,9 +115,11 @@ func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB 
 		cfg:             cfg,
 		defaultResolver: defaultResolver,
 		authSessions:    make(map[string]authSession),
+		authStopCh:      make(chan struct{}),
 		portUsers:       make(map[int]string),
 		userServers:     make(map[int]*http.Server),
 	}
+	go h.cleanupAuthSessions()
 
 	// Wraps DialContext to detect DNS-blocked addresses before connecting.
 	// Reads per-user resolver from context; falls back to the global default.
@@ -211,6 +214,32 @@ func (h *Handler) checkAuthSession(ip, portUser string) string {
 		return s.user
 	}
 	return ""
+}
+
+// cleanupAuthSessions periodically removes expired entries from the auth session cache.
+func (h *Handler) cleanupAuthSessions() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			h.authMu.Lock()
+			for k, s := range h.authSessions {
+				if now.After(s.expires) {
+					delete(h.authSessions, k)
+				}
+			}
+			h.authMu.Unlock()
+		case <-h.authStopCh:
+			return
+		}
+	}
+}
+
+// StopAuthCleanup stops the auth session cleanup goroutine.
+func (h *Handler) StopAuthCleanup() {
+	close(h.authStopCh)
 }
 
 // portOwnerFromCtx returns the expected username for the per-user port, or "".
