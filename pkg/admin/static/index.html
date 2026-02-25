@@ -56,7 +56,8 @@
     <h2>traffic &middot; 10 min</h2>
     <canvas id="traffic-canvas"></canvas>
     <div class="graph-legend">
-      <span class="legend-bytes">bytes</span>
+      <span class="legend-rx">rx</span>
+      <span class="legend-tx">tx</span>
       <span class="legend-reqs">requests</span>
     </div>
   </div>
@@ -70,6 +71,8 @@ function getThemeColors() {
   return {
     graphFill: s.getPropertyValue('--graph-fill').trim(),
     graphStroke: s.getPropertyValue('--graph-stroke').trim(),
+    graphTxFill: s.getPropertyValue('--graph-tx-fill').trim(),
+    graphTxStroke: s.getPropertyValue('--graph-tx-stroke').trim(),
     graphReq: s.getPropertyValue('--graph-req').trim(),
     fgDim: s.getPropertyValue('--fg-dim').trim(),
   };
@@ -451,7 +454,7 @@ async function refreshStats() {
 setInterval(refreshStats, 5000);
 refreshStats();
 
-// --- Traffic Graph ---
+// --- Traffic Graph (split RX up / TX down) ---
 function drawGraph(buckets) {
   var canvas = document.getElementById('traffic-canvas');
   var dpr = window.devicePixelRatio || 1;
@@ -475,51 +478,87 @@ function drawGraph(buckets) {
     return;
   }
 
-  var maxBytes = Math.max.apply(null, buckets.map(function(b) { return b.br + b.bw; })) || 1;
+  var maxRx = Math.max.apply(null, buckets.map(function(b) { return b.bw; })) || 1;
+  var maxTx = Math.max.apply(null, buckets.map(function(b) { return b.br; })) || 1;
+  var maxBytes = Math.max(maxRx, maxTx);
   var maxReqs = Math.max.apply(null, buckets.map(function(b) { return b.reqs; })) || 1;
   var barW = w / buckets.length;
-  var pad = 16;
+  var pad = 14;
+  var mid = h / 2;
 
+  // Center baseline
+  ctx.strokeStyle = tc.fgDim;
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([2, 3]);
+  ctx.beginPath();
+  ctx.moveTo(0, mid);
+  ctx.lineTo(w, mid);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // RX fill (above baseline — bytes written to client = download)
   ctx.fillStyle = tc.graphFill;
+  ctx.beginPath();
+  ctx.moveTo(barW / 2, mid);
+  buckets.forEach(function(b, i) {
+    var y = mid - (b.bw / maxBytes) * (mid - pad);
+    ctx.lineTo(i * barW + barW / 2, y);
+  });
+  ctx.lineTo((buckets.length - 1) * barW + barW / 2, mid);
+  ctx.fill();
+
+  // RX stroke
   ctx.strokeStyle = tc.graphStroke;
   ctx.lineWidth = 1;
   ctx.beginPath();
   buckets.forEach(function(b, i) {
-    var y = h - ((b.br + b.bw) / maxBytes) * (h - pad);
+    var y = mid - (b.bw / maxBytes) * (mid - pad);
     var x = i * barW + barW / 2;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  var lastX = (buckets.length - 1) * barW + barW / 2;
-  ctx.lineTo(lastX, h);
-  ctx.lineTo(barW / 2, h);
-  ctx.fill();
-
-  ctx.beginPath();
-  buckets.forEach(function(b, i) {
-    var y = h - ((b.br + b.bw) / maxBytes) * (h - pad);
-    var x = i * barW + barW / 2;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.stroke();
 
+  // TX fill (below baseline — bytes read from client = upload)
+  ctx.fillStyle = tc.graphTxFill;
+  ctx.beginPath();
+  ctx.moveTo(barW / 2, mid);
+  buckets.forEach(function(b, i) {
+    var y = mid + (b.br / maxBytes) * (mid - pad);
+    ctx.lineTo(i * barW + barW / 2, y);
+  });
+  ctx.lineTo((buckets.length - 1) * barW + barW / 2, mid);
+  ctx.fill();
+
+  // TX stroke
+  ctx.strokeStyle = tc.graphTxStroke;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  buckets.forEach(function(b, i) {
+    var y = mid + (b.br / maxBytes) * (mid - pad);
+    var x = i * barW + barW / 2;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Requests line (spans full height)
   ctx.strokeStyle = tc.graphReq;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   buckets.forEach(function(b, i) {
-    var y = h - (b.reqs / maxReqs) * (h - pad);
+    var y = h - pad - (b.reqs / maxReqs) * (h - 2 * pad);
     var x = i * barW + barW / 2;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.stroke();
 
+  // Labels — positive values on both sides
   ctx.fillStyle = tc.fgDim;
   ctx.font = '10px Inconsolata';
-  ctx.fillText('reqs: ' + maxReqs, 4, 11);
+  ctx.textAlign = 'left';
+  ctx.fillText('rx ' + fmtBytes(maxBytes), 4, pad - 2);
+  ctx.fillText('tx ' + fmtBytes(maxBytes), 4, h - 4);
   ctx.textAlign = 'right';
-  ctx.fillText(fmtBytes(maxBytes), w - 4, 11);
+  ctx.fillText('reqs: ' + maxReqs, w - 4, pad - 2);
   ctx.textAlign = 'left';
 }
 

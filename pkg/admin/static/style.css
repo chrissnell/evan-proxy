@@ -25,9 +25,13 @@
   --btn-border: #ccc;
   --graph-fill: rgba(42, 122, 90, 0.12);
   --graph-stroke: rgba(42, 122, 90, 0.5);
+  --graph-tx-fill: rgba(180, 100, 60, 0.12);
+  --graph-tx-stroke: rgba(180, 100, 60, 0.5);
   --graph-req: #333;
-  --legend-bytes-bg: rgba(42, 122, 90, 0.2);
-  --legend-bytes-border: #2a7a5a;
+  --legend-rx-bg: rgba(42, 122, 90, 0.2);
+  --legend-rx-border: #2a7a5a;
+  --legend-tx-bg: rgba(180, 100, 60, 0.2);
+  --legend-tx-border: #b4643c;
   --legend-reqs-bg: #555;
   --scrollbar-track: #f0f0f0;
   --scrollbar-thumb: #ccc;
@@ -53,9 +57,13 @@
   --btn-border: #333;
   --graph-fill: rgba(85, 170, 153, 0.15);
   --graph-stroke: rgba(85, 170, 153, 0.4);
+  --graph-tx-fill: rgba(200, 130, 80, 0.15);
+  --graph-tx-stroke: rgba(200, 130, 80, 0.4);
   --graph-req: #c8c8c8;
-  --legend-bytes-bg: rgba(85, 170, 153, 0.3);
-  --legend-bytes-border: #5a9;
+  --legend-rx-bg: rgba(85, 170, 153, 0.3);
+  --legend-rx-border: #5a9;
+  --legend-tx-bg: rgba(200, 130, 80, 0.3);
+  --legend-tx-border: #c88050;
   --legend-reqs-bg: #c8c8c8;
   --scrollbar-track: #111;
   --scrollbar-thumb: #333;
@@ -83,9 +91,13 @@
     --btn-border: #333;
     --graph-fill: rgba(85, 170, 153, 0.15);
     --graph-stroke: rgba(85, 170, 153, 0.4);
+    --graph-tx-fill: rgba(200, 130, 80, 0.15);
+    --graph-tx-stroke: rgba(200, 130, 80, 0.4);
     --graph-req: #c8c8c8;
-    --legend-bytes-bg: rgba(85, 170, 153, 0.3);
-    --legend-bytes-border: #5a9;
+    --legend-rx-bg: rgba(85, 170, 153, 0.3);
+    --legend-rx-border: #5a9;
+    --legend-tx-bg: rgba(200, 130, 80, 0.3);
+    --legend-tx-border: #c88050;
     --legend-reqs-bg: #c8c8c8;
     --scrollbar-track: #111;
     --scrollbar-thumb: #333;
@@ -299,7 +311,7 @@ button:hover {
 
 #traffic-canvas {
   width: 100%;
-  height: 140px;
+  height: 180px;
   display: block;
 }
 
@@ -321,7 +333,8 @@ button:hover {
   vertical-align: middle;
 }
 
-.legend-bytes::before { background: var(--legend-bytes-bg); border: 1px solid var(--legend-bytes-border); }
+.legend-rx::before { background: var(--legend-rx-bg); border: 1px solid var(--legend-rx-border); }
+.legend-tx::before { background: var(--legend-tx-bg); border: 1px solid var(--legend-tx-border); }
 .legend-reqs::before { background: var(--legend-reqs-bg); }
 
 #log-tail {
