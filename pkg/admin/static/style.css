@@ -309,9 +309,10 @@ button:hover {
   font-style: italic;
 }
 
-#traffic-canvas {
+#traffic-canvas,
+#requests-canvas {
   width: 100%;
-  height: 180px;
+  height: 140px;
   display: block;
 }
 

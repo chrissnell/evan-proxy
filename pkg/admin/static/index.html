@@ -52,13 +52,21 @@
     </div>
   </div>
 
-  <div class="box">
-    <h2>traffic &middot; 10 min</h2>
-    <canvas id="traffic-canvas"></canvas>
-    <div class="graph-legend">
-      <span class="legend-rx">rx</span>
-      <span class="legend-tx">tx</span>
-      <span class="legend-reqs">requests</span>
+  <div class="grid-2">
+    <div class="box">
+      <h2>bandwidth &middot; 10 min</h2>
+      <canvas id="traffic-canvas"></canvas>
+      <div class="graph-legend">
+        <span class="legend-rx">rx</span>
+        <span class="legend-tx">tx</span>
+      </div>
+    </div>
+    <div class="box">
+      <h2>requests &middot; 10 min</h2>
+      <canvas id="requests-canvas"></canvas>
+      <div class="graph-legend">
+        <span class="legend-reqs">requests</span>
+      </div>
     </div>
   </div>
 
@@ -454,34 +462,34 @@ async function refreshStats() {
 setInterval(refreshStats, 5000);
 refreshStats();
 
-// --- Traffic Graph (split RX up / TX down) ---
-function drawGraph(buckets) {
-  var canvas = document.getElementById('traffic-canvas');
+// --- Traffic Graphs ---
+function initCanvas(id) {
+  var canvas = document.getElementById(id);
   var dpr = window.devicePixelRatio || 1;
   var rect = canvas.getBoundingClientRect();
   canvas.width = rect.width * dpr;
   canvas.height = rect.height * dpr;
   var ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
-  var w = rect.width, h = rect.height;
+  return { ctx: ctx, w: rect.width, h: rect.height };
+}
 
-  ctx.clearRect(0, 0, w, h);
-
+function drawTraffic(buckets) {
+  var c = initCanvas('traffic-canvas');
+  var ctx = c.ctx, w = c.w, h = c.h;
   var tc = getThemeColors();
 
   if (!buckets || buckets.length === 0) {
     ctx.fillStyle = tc.fgDim;
     ctx.font = '11px Inconsolata, Courier New, monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('no traffic data', w / 2, h / 2);
-    ctx.textAlign = 'left';
+    ctx.fillText('no data', w / 2, h / 2);
     return;
   }
 
   var maxRx = Math.max.apply(null, buckets.map(function(b) { return b.bw; })) || 1;
   var maxTx = Math.max.apply(null, buckets.map(function(b) { return b.br; })) || 1;
   var maxBytes = Math.max(maxRx, maxTx);
-  var maxReqs = Math.max.apply(null, buckets.map(function(b) { return b.reqs; })) || 1;
   var barW = w / buckets.length;
   var pad = 14;
   var mid = h / 2;
@@ -540,9 +548,45 @@ function drawGraph(buckets) {
   });
   ctx.stroke();
 
-  // Requests line (spans full height)
-  ctx.strokeStyle = tc.graphReq;
-  ctx.lineWidth = 1.5;
+  // Labels
+  ctx.fillStyle = tc.fgDim;
+  ctx.font = '10px Inconsolata';
+  ctx.textAlign = 'left';
+  ctx.fillText('rx ' + fmtBytes(maxBytes), 4, pad - 2);
+  ctx.fillText('tx ' + fmtBytes(maxBytes), 4, h - 4);
+}
+
+function drawRequests(buckets) {
+  var c = initCanvas('requests-canvas');
+  var ctx = c.ctx, w = c.w, h = c.h;
+  var tc = getThemeColors();
+
+  if (!buckets || buckets.length === 0) {
+    ctx.fillStyle = tc.fgDim;
+    ctx.font = '11px Inconsolata, Courier New, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('no data', w / 2, h / 2);
+    return;
+  }
+
+  var maxReqs = Math.max.apply(null, buckets.map(function(b) { return b.reqs; })) || 1;
+  var barW = w / buckets.length;
+  var pad = 14;
+
+  // Fill
+  ctx.fillStyle = tc.graphFill;
+  ctx.beginPath();
+  ctx.moveTo(barW / 2, h);
+  buckets.forEach(function(b, i) {
+    var y = h - pad - (b.reqs / maxReqs) * (h - 2 * pad);
+    ctx.lineTo(i * barW + barW / 2, y);
+  });
+  ctx.lineTo((buckets.length - 1) * barW + barW / 2, h);
+  ctx.fill();
+
+  // Stroke
+  ctx.strokeStyle = tc.graphStroke;
+  ctx.lineWidth = 1;
   ctx.beginPath();
   buckets.forEach(function(b, i) {
     var y = h - pad - (b.reqs / maxReqs) * (h - 2 * pad);
@@ -551,15 +595,16 @@ function drawGraph(buckets) {
   });
   ctx.stroke();
 
-  // Labels — positive values on both sides
+  // Label
   ctx.fillStyle = tc.fgDim;
   ctx.font = '10px Inconsolata';
-  ctx.textAlign = 'left';
-  ctx.fillText('rx ' + fmtBytes(maxBytes), 4, pad - 2);
-  ctx.fillText('tx ' + fmtBytes(maxBytes), 4, h - 4);
   ctx.textAlign = 'right';
-  ctx.fillText('reqs: ' + maxReqs, w - 4, pad - 2);
-  ctx.textAlign = 'left';
+  ctx.fillText(maxReqs, w - 4, pad - 2);
+}
+
+function drawGraphs(buckets) {
+  drawTraffic(buckets);
+  drawRequests(buckets);
 }
 
 function fmtBytes(b) {
@@ -572,7 +617,7 @@ function fmtBytes(b) {
 async function refreshTraffic() {
   try {
     var data = await fetch('/api/stats/traffic').then(function(r) { return r.json(); });
-    drawGraph(data);
+    drawGraphs(data);
   } catch (e) { /* retry next cycle */ }
 }
 
