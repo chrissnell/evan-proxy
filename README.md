@@ -1,20 +1,30 @@
 # evan-proxy
 
-I built this proxy out of parental necessity.  I use MDM to force my teenager's phone through a forward proxy so that I can monitor and control the content and services he accesses.  
+I built this proxy out of parental necessity.  I tried all of the prominent child web filtering solutions and they were all terrible and expensive.
 
-Sadly, neither Apple Screentime nor common proxy software offerings allow you to disable a proxy with the click of a button.   Every parent of a teenager knows what this button is for.
+All I wanted was to keep my kids away from harmful content and to be able to quickly turn internet on and off for them, but these services all required installing their sketchy MDM profile and using some crappy app.  I never knew what they were doing with my kids' info behind the scenes.
 
-So, I built this with tech-savvy parents in mind.
+I knew I could do better.  
+
+I would create my own MDM profile with the excellent and free [iMazing Profile Editor](https://imazing.com/profile-editor) and manage it through [SimpleMDM](https://simplemdm.com/).  I would use the profile to force my kids' phones through a proxy that I control.  I would use [NextDNS](https://nextdns.io/) (free tier) to filter out the apps and categories of websites that I didn't want them to visit. 
+
+The unsolved problem was the proxy server.
+
+There are a number of open-soruce proxy servers out there but none of them made it easy to turn on/off a single child's phone quickly and easily.  And none of them would let me easily set a unique DNS resolver for each child--my kids get different levels of restriction depending on their age.
+
+**I decided to write evan-proxy.**   It's a simple and secure web proxy with per-child DNS server selection, authentication, and logging.
 
 To make this work, follow this plan:
 
-1. Set up *evan-proxy* on infrastructure of your choice. I run it on a homelab Kubernetes cluster and used the included Helm chart to install it.  You will need to expose the proxy port (and optionally, the administrator port) to the Internet so that your child's phone can connect.
-1. Use something like the excellent [iMazing Profile Editor](https://imazing.com/profile-editor) to create a MDM profile for your child's Apple device.  
-2. Configure the profile with a Global HTTP Proxy enforced.
-3. Sign up for a DNS service like [NextDNS](https://nextdns.io/) and configure their DNS to your liking, blocking what you wish to block. 
-4. Add that DNS server to the MDM profile to enforce its use.
-5. Sign up for a MDM service like [SimpleMDM](https://simplemdm.com/) to install and remotely maintain that profile.  This is what keeps your kid from reverting your restrictions.  Or, at least, it gives you a way to know when they've subverted them.
-
+1. Set up *evan-proxy* on infrastructure of your choice. I run it on a homelab Kubernetes cluster and used the included Helm chart to install it, but you could easily run it on a single Raspberry Pi if you wanted.
+2. Set up a user in the evan-proxy Admin UI for your child, with a [strong but easy](https://xkcd.com/936/) password.
+3. Use something like the excellent [iMazing Profile Editor](https://imazing.com/profile-editor) to create a MDM profile for your child's Apple device.  
+4. Configure the profile with a Global HTTP Proxy enforced.
+5. Sign up for a DNS service like [NextDNS](https://nextdns.io/) and configure their DNS to your liking, blocking what you wish to block. 
+6. Add that DNS server to the MDM profile to enforce its use.
+7. Also, add that DNS server to the user's account in the evan-proxy Admin UI.
+8. Sign up for a MDM service like [SimpleMDM](https://simplemdm.com/) to install and remotely maintain that profile.  This is what keeps your kid from reverting your restrictions.  Or, at least, it gives you a way to know when they've subverted them.
+9. (optional) Set up a Prometheus dashboard to monitor proxy use and performance
 
 ## Features:
 - HTTP and HTTPS (TLS) forward proxy with CONNECT tunnel support
