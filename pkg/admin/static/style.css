@@ -416,11 +416,9 @@ button:hover {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.inline-edit-cell { text-align: right; }
-
 .inline-edit-form {
-  display: inline-flex;
-  gap: 0.25rem;
+  display: flex;
+  gap: 0.5rem;
   align-items: center;
 }
 
@@ -457,13 +455,17 @@ button:hover {
   color: var(--fg);
   padding: 0.2rem 0.5rem;
   border-radius: 2px;
-  width: 14em;
+  width: 20em;
   margin: 0;
-  height: 1.6em;
-  line-height: 1;
 }
 
-.inline-input-short { width: 6em; }
+.inline-input-short { width: 8em; }
+
+.edit-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 0.25rem;
+}
 
 .inline-input:focus { border-color: var(--accent); outline: none; }
 .inline-input:disabled { opacity: 0.4; }

@@ -32,6 +32,11 @@
     </div>
   </div>
 
+  <div class="box">
+    <h2>log tail</h2>
+    <div id="log-tail"></div>
+  </div>
+
   <div class="grid-2">
     <div class="box">
       <h2>top sites &middot; 1h</h2>
@@ -56,10 +61,6 @@
     </div>
   </div>
 
-  <div class="box">
-    <h2>log tail</h2>
-    <div id="log-tail"></div>
-  </div>
 </div>
 
 <script>
@@ -217,8 +218,7 @@ function renderDNSEditRow(u) {
     return '<button class="' + cls + '" onclick="setDNSProto(\'' + esc + '\',\'' + val + '\')">' + label + '</button>';
   }
   return '<tr class="inline-edit-row">' +
-    '<td></td><td></td><td></td><td></td>' +
-    '<td class="inline-edit-cell" colspan="2">' +
+    '<td colspan="6" class="inline-edit-cell">' +
       '<div class="inline-edit-form">' +
         '<span class="dns-proto-group">' +
           pbtn('', 'default') + pbtn('plain', 'plain') + pbtn('tls', 'tls') + pbtn('https', 'https') +
@@ -230,8 +230,10 @@ function renderDNSEditRow(u) {
         '<button class="btn-sm" onclick="testDNS(\'' + esc + '\')"' +
           (proto === '' ? ' disabled' : '') + '>test</button>' +
         '<span id="dns-result-' + esc + '"></span>' +
-        '<button class="btn-sm btn-save" onclick="saveDNS(\'' + esc + '\')">save</button>' +
-        '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+        '<span class="edit-actions">' +
+          '<button class="btn-sm btn-save" onclick="saveDNS(\'' + esc + '\')">save</button>' +
+          '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+        '</span>' +
       '</div>' +
     '</td></tr>';
 }
@@ -239,13 +241,14 @@ function renderDNSEditRow(u) {
 function renderPortEditRow(u) {
   var esc = escAttr(u.username);
   return '<tr class="inline-edit-row">' +
-    '<td></td><td></td><td></td><td></td>' +
-    '<td class="inline-edit-cell" colspan="2">' +
+    '<td colspan="6" class="inline-edit-cell">' +
       '<div class="inline-edit-form">' +
         '<input type="number" id="port-input-' + esc + '" class="inline-input inline-input-short"' +
           ' value="' + (u.port || '') + '" placeholder="port">' +
-        '<button class="btn-sm btn-save" onclick="savePort(\'' + esc + '\')">save</button>' +
-        '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+        '<span class="edit-actions">' +
+          '<button class="btn-sm btn-save" onclick="savePort(\'' + esc + '\')">save</button>' +
+          '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+        '</span>' +
       '</div>' +
     '</td></tr>';
 }
@@ -253,13 +256,14 @@ function renderPortEditRow(u) {
 function renderPasswordEditRow(u) {
   var esc = escAttr(u.username);
   return '<tr class="inline-edit-row">' +
-    '<td></td><td></td><td></td><td></td>' +
-    '<td class="inline-edit-cell" colspan="2">' +
+    '<td colspan="6" class="inline-edit-cell">' +
       '<div class="inline-edit-form">' +
         '<input type="password" id="pw-input-' + esc + '" class="inline-input"' +
           ' placeholder="new password">' +
-        '<button class="btn-sm btn-save" onclick="savePassword(\'' + esc + '\')">save</button>' +
-        '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+        '<span class="edit-actions">' +
+          '<button class="btn-sm btn-save" onclick="savePassword(\'' + esc + '\')">save</button>' +
+          '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+        '</span>' +
       '</div>' +
     '</td></tr>';
 }
