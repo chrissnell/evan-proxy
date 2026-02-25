@@ -6,7 +6,7 @@ PLATFORM ?= linux/amd64
 .PHONY: build test clean docker docker-push deploy helm
 
 build:
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o $(APP) .
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o $(APP) ./cmd/evan-proxy
 
 test:
 	go test ./...
