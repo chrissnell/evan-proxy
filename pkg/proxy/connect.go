@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -178,13 +179,25 @@ func (h *Handler) connectTunnel(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx 
 
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("panic in tunnel read goroutine (host=%s user=%s): %v", host, user, r)
+			}
+		}()
 		io.Copy(readCounter, bufrw) // client -> target
 		readCounter.Close()
-		targetConn.(*net.TCPConn).CloseWrite()
+		if tc, ok := targetConn.(*net.TCPConn); ok {
+			tc.CloseWrite()
+		}
 	}()
 
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("panic in tunnel write goroutine (host=%s user=%s): %v", host, user, r)
+			}
+		}()
 		io.Copy(writeCounter, targetConn) // target -> client
 		writeCounter.Close()
 	}()

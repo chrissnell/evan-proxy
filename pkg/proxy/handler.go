@@ -133,7 +133,10 @@ func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB 
 			if err != nil {
 				return nil, err
 			}
-			if len(ips) > 0 && isDNSBlocked(ips[0].IP) {
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("dns: no addresses for %s", host)
+			}
+			if isDNSBlocked(ips[0].IP) {
 				return nil, fmt.Errorf("%w: %s resolved to %s", ErrDNSBlocked, host, ips[0].IP)
 			}
 			// Dial the resolved IP directly to avoid double resolution
