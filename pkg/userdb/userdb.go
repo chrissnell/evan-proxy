@@ -27,16 +27,20 @@ var (
 	ErrUserExists    = errors.New("user already exists")
 )
 
-// Argon2id parameters
+// Argon2id parameters for new hashes. Existing hashes store their own
+// params and are verified as-is; only newly created hashes use these.
 const (
 	argonTime    = 1
-	argonMemory  = 64 * 1024
+	argonMemory  = 16 * 1024 // 16MB — previous 64MB caused OOM on reconnection bursts
 	argonThreads = 4
 	argonKeyLen  = 32
 	argonSaltLen = 16
 
 	cacheTTL = 5 * time.Minute
 )
+
+// Limits concurrent argon2 operations to prevent memory spikes.
+var argonSem = make(chan struct{}, 2)
 
 type cachedAuth struct {
 	passwordSHA256 [32]byte
@@ -471,6 +475,13 @@ func (d *DB) Check(proxyAuthHeader string) (string, error) {
 		return "", fmt.Errorf("%w: %q", ErrWrongPassword, user)
 	}
 
+	// Re-hash with current params if the stored hash uses old (expensive) settings
+	if needsRehash(storedHash) {
+		if newHash, err := hashPassword(pass); err == nil {
+			d.db.Exec("UPDATE users SET password_hash = ? WHERE username = ?", newHash, user)
+		}
+	}
+
 	// Valid — populate cache
 	d.mu.Lock()
 	d.cache[user] = cachedAuth{
@@ -537,7 +548,9 @@ func hashPassword(password string) (string, error) {
 		return "", err
 	}
 
+	argonSem <- struct{}{}
 	hash := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	<-argonSem
 
 	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
 		argonMemory, argonTime, argonThreads,
@@ -571,8 +584,21 @@ func verifyPassword(password, encoded string) bool {
 		return false
 	}
 
+	argonSem <- struct{}{}
 	hash := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(expectedHash)))
+	<-argonSem
 	return subtle.ConstantTimeCompare(hash, expectedHash) == 1
+}
+
+// needsRehash returns true if the stored hash uses different argon2 params
+// than the current defaults (e.g. old 64MB hashes that should be migrated).
+func needsRehash(encoded string) bool {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 6 {
+		return true
+	}
+	expected := fmt.Sprintf("m=%d,t=%d,p=%d", argonMemory, argonTime, argonThreads)
+	return parts[3] != expected
 }
 
 func parseBasicAuth(header string) (string, string, bool) {
