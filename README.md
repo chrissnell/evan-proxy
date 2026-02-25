@@ -7,8 +7,8 @@ All I wanted was to keep my kids away from harmful content and to be able to qui
 I knew I could do better.  
 
 I would create my own MDM profile with the excellent and free [iMazing Profile Editor](https://imazing.com/profile-editor) and manage it through [SimpleMDM](https://simplemdm.com/).  I would use the profile to force my kids' phones through a proxy that I control.  I would use [NextDNS](https://nextdns.io/) (free tier) to filter out the apps and categories of websites that I didn't want them to visit. 
-
-The unsolved problem was the proxy server.
+ 
+**The unsolved problem was the proxy server.**
 
 There are a number of open-soruce proxy servers out there but none of them made it easy to turn on/off a single child's phone quickly and easily.  And none of them would let me easily set a unique DNS resolver for each child--my kids get different levels of restriction depending on their age.
 
@@ -28,13 +28,17 @@ To make this work, follow this plan:
 
 ## Features:
 - HTTP and HTTPS (TLS) forward proxy with CONNECT tunnel support
-- iOS-compatible 407 Proxy-Authentication-Required flow
-- Multi-user Basic authentication
-- Admin web interface for status monitoring and proxy enable/disable
-- Per-IP rate limiting on authentication failures
-- DNS-level block detection (returns 523 for DNS-blocked domains)
-- Structured JSON or human-readable logging
+- Per-user dedicated proxy ports with per-user DNS resolver selection
+- Admin web UI for user management, live log streaming, and proxy enable/disable
 - Helm chart for Kubernetes deployment
+- Rate-limiting on authentication failures to prevent password brute-forcing
+- DNS-over-TLS (DoT) and DNS-over-HTTPS (DoH) support
+- DNS-level block detection (returns 523 for DNS-blocked domains)
+- Prometheus metrics endpoint (`/metrics`)
+
+## Screenshot
+
+![evan-proxy admin UI](assets/screenshot.png)
 
 ## Configuration
 
@@ -46,7 +50,6 @@ evan-proxy is configured via environment variables. All settings have sensible d
 |----------|-------------|
 | `ADMIN_USER` | Admin interface username |
 | `ADMIN_PASSWORD` | Admin interface password (bcrypt hash) |
-| `PROXY_USERS_FILE` | Path to JSON file containing proxy user credentials (default: `/etc/evan-proxy/users.json`) |
 
 Generate a bcrypt hash for the admin password:
 
@@ -58,13 +61,14 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LISTEN_PLAIN` | `:8080` | Plain HTTP proxy listen address |
-| `LISTEN_TLS` | `:443` | TLS proxy listen address (only active when TLS_CERT is set) |
+| `PROXY_DB_PATH` | `/data/evan-proxy/users.db` | Path to SQLite user database |
+| `PROXY_USERS_FILE` | | Path to JSON seed file for initial user import |
 | `ADMIN_LISTEN` | `:9090` | Admin interface listen address |
-| `TLS_CERT` | | Path to TLS certificate file |
-| `TLS_KEY` | | Path to TLS private key file |
 | `DNS_SERVER` | | Custom DNS resolver (e.g. `1.1.1.1:53`), empty uses system default |
-| `AUTH_RETRY_TIMEOUT` | `30s` | Time to hold connection open for iOS 407 auth retry |
+| `DNS_PROTOCOL` | `plain` | DNS protocol: `plain`, `tls` (DoT), or `https` (DoH) |
+| `USER_PORT_MIN` | `8081` | First per-user dedicated proxy port |
+| `USER_PORT_MAX` | `8090` | Last per-user dedicated proxy port |
+| `AUTH_RETRY_TIMEOUT` | `5s` | Time to hold connection open for iOS 407 auth retry |
 | `CONNECT_DIAL_TIMEOUT` | `10s` | Timeout for dialing target hosts |
 | `IDLE_TIMEOUT` | `300s` | TCP idle connection timeout |
 | `HTTP_TIMEOUT` | `30s` | HTTP response timeout |
@@ -72,9 +76,9 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `AUTH_FAIL_WINDOW` | `60s` | Sliding window for rate limiting |
 | `LOG_FORMAT` | `human` | Log format: `json` or `human` |
 
-### Proxy Users File
+### User Seed File
 
-The proxy users file is a JSON file with the following format:
+On first run, if the SQLite database is empty and `PROXY_USERS_FILE` is set, users are imported from the JSON seed file:
 
 ```json
 {
@@ -85,16 +89,18 @@ The proxy users file is a JSON file with the following format:
 }
 ```
 
+After initial import, users are managed through the admin web UI and stored in the SQLite database.
+
 ## Building
 
 ```bash
-go build -o evan-proxy .
+make build    # or: CGO_ENABLED=0 go build -ldflags="-s -w" -o evan-proxy ./cmd/evan-proxy
 ```
 
 ## Docker
 
 ```bash
-docker build -t evan-proxy .
+make docker   # or: docker buildx build -t ghcr.io/chrissnell/evan-proxy:dev .
 ```
 
 ## Helm Chart
@@ -113,42 +119,43 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 |-----|------|---------|-------------|
 | `replicaCount` | int | `1` | Number of replicas |
 | `image.repository` | string | `"ghcr.io/chrissnell/evan-proxy"` | Container image repository |
-| `image.tag` | string | `"0.1.4"` | Container image tag |
+| `image.tag` | string | `"0.1.5"` | Container image tag |
 | `image.pullPolicy` | string | `"IfNotPresent"` | Image pull policy |
 | `imagePullSecrets` | list | `[{name: ghcr-secret}]` | Image pull secrets |
-| `proxy.listenPlain` | string | `":8080"` | Plain HTTP proxy listen address |
-| `proxy.listenTLS` | string | `":443"` | TLS proxy listen address |
 | `proxy.logFormat` | string | `"human"` | Log format: `json` or `human` |
 | `proxy.idleTimeout` | string | `"300s"` | TCP idle connection timeout |
 | `proxy.httpTimeout` | string | `"30s"` | HTTP response timeout |
 | `proxy.connectDialTimeout` | string | `"10s"` | Timeout for dialing target hosts |
-| `proxy.authRetryTimeout` | string | `"30s"` | Time to hold connection for iOS 407 retry |
+| `proxy.authRetryTimeout` | string | `"5s"` | Time to hold connection for iOS 407 retry |
 | `proxy.authFailRateLimit` | int | `5` | Failed auth attempts before rate limiting |
 | `proxy.authFailWindow` | string | `"60s"` | Sliding window for rate limiting |
 | `proxy.dnsServer` | string | `""` | Custom DNS resolver, empty uses system default |
-| `proxyUsers` | list | `[{username: "proxy", password: "CHANGEME"}]` | Proxy user credentials |
+| `proxy.dnsProtocol` | string | `""` | DNS protocol: `plain`, `tls`, or `https` (empty = plain) |
+| `proxy.userPortMin` | int | `8080` | First per-user dedicated proxy port |
+| `proxy.userPortMax` | int | `8090` | Last per-user dedicated proxy port |
+| `proxyUsers` | list | `[{username: "proxy", password: "CHANGEME"}]` | Seed user credentials (imported on first run) |
 | `admin.listen` | string | `":9090"` | Admin interface listen address |
 | `admin.user` | string | `"admin"` | Admin username |
 | `admin.passwordHash` | string | `"$2y$10$CHANGEME"` | Admin password as bcrypt hash |
 | `existingSecret` | string | `""` | Use a pre-created Secret instead of generating one. Must contain keys: `users.json`, `ADMIN_USER`, `ADMIN_PASSWORD` |
-| `tls.enabled` | bool | `false` | Enable TLS proxy listener |
-| `tls.certManager.enabled` | bool | `false` | Use cert-manager for TLS certificates |
-| `tls.certManager.issuer` | string | `"letsencrypt-prod"` | cert-manager issuer name |
-| `tls.certManager.issuerKind` | string | `"ClusterIssuer"` | cert-manager issuer kind |
-| `tls.existingSecret` | string | `""` | Existing TLS secret name |
-| `tls.domain` | string | `""` | Domain for cert-manager Certificate resource |
+| `persistence.enabled` | bool | `true` | Enable persistent storage for SQLite database |
+| `persistence.size` | string | `"1Gi"` | PVC size |
+| `persistence.storageClass` | string | `""` | StorageClass (empty = default) |
 | `service.type` | string | `"LoadBalancer"` | Kubernetes service type |
 | `service.loadBalancerIP` | string | `""` | Static IP from MetalLB pool |
 | `service.annotations` | object | `{}` | Service annotations |
-| `service.plainPort` | int | `8080` | Service port for plain proxy |
-| `service.tlsPort` | int | `443` | Service port for TLS proxy |
 | `service.adminPort` | int | `9090` | Service port for admin interface |
-| `resources.requests.cpu` | string | `"50m"` | CPU request |
-| `resources.requests.memory` | string | `"32Mi"` | Memory request |
-| `resources.limits.cpu` | string | `"500m"` | CPU limit |
-| `resources.limits.memory` | string | `"128Mi"` | Memory limit |
+| `ingress.enabled` | bool | `false` | Enable ingress (e.g. for admin UI) |
+| `ingress.className` | string | `"cloudflare-tunnel"` | Ingress class name |
+| `ingress.hosts` | list | | Ingress host rules |
+| `resources.requests.cpu` | string | `"100m"` | CPU request |
+| `resources.requests.memory` | string | `"64Mi"` | Memory request |
+| `resources.limits.cpu` | string | `"1000m"` | CPU limit |
+| `resources.limits.memory` | string | `"512Mi"` | Memory limit |
 | `networkPolicy.enabled` | bool | `true` | Enable Kubernetes NetworkPolicy |
 | `networkPolicy.allowAllEgress` | bool | `true` | Allow all egress for CONNECT tunnels |
 | `nodeSelector` | object | `{}` | Node selector |
 | `tolerations` | list | `[]` | Tolerations |
 | `affinity` | object | `{}` | Affinity rules |
+
+Per-user proxy ports (`userPortMin` through `userPortMax`) are automatically exposed on both the deployment and the service. Each user is assigned a dedicated port via the admin UI.
