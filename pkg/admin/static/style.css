@@ -412,14 +412,20 @@ button:hover {
 
 /* Inline edit rows (dns, port, password) */
 .inline-edit-row td {
-  padding: 0.25rem 0;
+  padding: 0.4rem 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .inline-edit-form {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: center;
+}
+
+.inline-edit-form .btn-sm {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  margin-left: 0;
 }
 
 .dns-proto-group {
@@ -449,17 +455,22 @@ button:hover {
 
 .inline-input {
   font-family: inherit;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   border: 1px solid var(--btn-border);
   background: var(--bg-input);
   color: var(--fg);
-  padding: 0.2rem 0.5rem;
+  padding: 0.25rem 0.5rem;
   border-radius: 2px;
-  width: 20em;
+  flex: 1;
+  min-width: 0;
+  max-width: 24rem;
   margin: 0;
 }
 
-.inline-input-short { width: 8em; }
+.inline-input-short {
+  flex: 0 0 6rem;
+  max-width: 6rem;
+}
 
 .edit-actions {
   margin-left: auto;
