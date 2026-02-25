@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"evan-proxy/pkg/logging"
 
@@ -19,6 +20,8 @@ type Metrics struct {
 	bytesWritten  prometheus.Counter
 	activeTunnels prometheus.Gauge
 	authFailures  prometheus.Counter
+	dnsLookups    *prometheus.CounterVec
+	dnsDuration   prometheus.Histogram
 }
 
 func New() *Metrics {
@@ -58,6 +61,17 @@ func New() *Metrics {
 			Name: "evanproxy_auth_failures_total",
 			Help: "Total authentication failures.",
 		}),
+
+		dnsLookups: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "evanproxy_dns_lookups_total",
+			Help: "Total DNS lookups by result.",
+		}, []string{"result"}),
+
+		dnsDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "evanproxy_dns_duration_seconds",
+			Help:    "DNS lookup duration in seconds.",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5},
+		}),
 	}
 
 	prometheus.MustRegister(
@@ -68,6 +82,8 @@ func New() *Metrics {
 		m.bytesWritten,
 		m.activeTunnels,
 		m.authFailures,
+		m.dnsLookups,
+		m.dnsDuration,
 	)
 
 	return m
@@ -136,4 +152,11 @@ func (m *Metrics) Observe(e logging.Entry) {
 			m.bytesWritten.Add(float64(e.BytesWritten))
 		}
 	}
+}
+
+// ObserveDNS records a DNS lookup result and duration.
+// Result should be "success", "failure", or "blocked".
+func (m *Metrics) ObserveDNS(d time.Duration, result string) {
+	m.dnsDuration.Observe(d.Seconds())
+	m.dnsLookups.WithLabelValues(result).Inc()
 }

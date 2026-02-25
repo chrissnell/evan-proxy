@@ -558,9 +558,10 @@ function startLogTail() {
     var bytes = (e.bytes_read || 0) + '/' + (e.bytes_written || 0);
 
     var line = ts + '  ' + user + '  ' + event + '  ' + method + '  ' + host + '  ' + status + '  ' + bytes;
+    if (e.error) line += '  err=' + e.error;
 
     var span = document.createElement('span');
-    if (e.event === 'dns-block') span.className = 'log-block';
+    if (e.event === 'dns-block' || e.event === 'dns-err') span.className = 'log-block';
     else if (e.status >= 400) span.className = 'log-err';
     else span.className = 'log-ok';
     span.textContent = line + '\n';

@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -96,7 +95,7 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 		h.logger.Log(logging.Entry{
 			Timestamp: start, ClientIP: clientIP, Method: r.Method,
 			Host: host, URI: r.RequestURI, User: user, Status: 403,
-			DurationMS: time.Since(start).Milliseconds(),
+			Error: "acl denied", DurationMS: time.Since(start).Milliseconds(),
 		})
 		return
 	}
@@ -114,18 +113,13 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.transport.RoundTrip(outReq)
 	if err != nil {
-		status := http.StatusBadGateway
-		event := ""
-		if errors.Is(err, ErrDNSBlocked) {
-			status = 523
-			event = "dns-block"
-		}
+		status, event := classifyDialError(err)
 		w.Header().Set("Content-Length", "0")
 		w.WriteHeader(status)
 		h.logger.Log(logging.Entry{
 			Timestamp: start, Event: event, ClientIP: clientIP, Method: r.Method,
 			Host: host, URI: r.RequestURI, User: user, Status: status,
-			DurationMS: time.Since(start).Milliseconds(),
+			Error: err.Error(), DurationMS: time.Since(start).Milliseconds(),
 		})
 		return
 	}

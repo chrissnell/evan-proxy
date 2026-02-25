@@ -35,8 +35,34 @@ type PortLister interface {
 	PortOwner(port int) (string, error)
 }
 
+// DNSObserver receives DNS lookup metrics.
+type DNSObserver interface {
+	ObserveDNS(d time.Duration, result string)
+}
+
 // ErrDNSBlocked is returned when DNS resolves to a loopback or null address.
 var ErrDNSBlocked = errors.New("dns blocked")
+
+// classifyDialError returns an HTTP status and log event for a dial/DNS error.
+func classifyDialError(err error) (status int, event string) {
+	if errors.Is(err, ErrDNSBlocked) {
+		return 523, "dns-block"
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "no addresses") ||
+		strings.Contains(msg, "server misbehaving"):
+		return 502, "dns-err"
+	case strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "deadline exceeded"):
+		return 504, "timeout"
+	case strings.Contains(msg, "connection refused"):
+		return 502, "refused"
+	default:
+		return 502, ""
+	}
+}
 
 type ctxKey int
 
@@ -64,6 +90,7 @@ type Handler struct {
 	dial            func(ctx context.Context, network, address string) (net.Conn, error)
 	cfg             *config.Config
 	defaultResolver *edns.Resolver
+	dnsObs          DNSObserver
 
 	// IP-based auth cache: after a client authenticates, allow subsequent
 	// requests from the same IP without re-challenging. This handles
@@ -90,7 +117,7 @@ func isDNSBlocked(ip net.IP) bool {
 	return ip.IsLoopback() || ip.Equal(net.IPv4zero) || loopbackNet.Contains(ip)
 }
 
-func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB PortLister, enabled UserEnabledChecker, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter) *Handler {
+func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB PortLister, enabled UserEnabledChecker, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, dnsObs DNSObserver) *Handler {
 	defaultResolver, err := edns.New(cfg.DNSProtocol, cfg.DNSServer)
 	if err != nil {
 		panic(fmt.Sprintf("dns resolver: %v", err))
@@ -114,6 +141,7 @@ func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB 
 		counter:         tc,
 		cfg:             cfg,
 		defaultResolver: defaultResolver,
+		dnsObs:          dnsObs,
 		authSessions:    make(map[string]authSession),
 		authStopCh:      make(chan struct{}),
 		portUsers:       make(map[int]string),
@@ -132,15 +160,29 @@ func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB 
 		// Only check hostnames, not bare IPs
 		if net.ParseIP(host) == nil {
 			resolver := h.resolverFromCtx(ctx)
+			dnsStart := time.Now()
 			ips, err := resolver.LookupIPAddr(ctx, host)
+			dnsDur := time.Since(dnsStart)
 			if err != nil {
+				if h.dnsObs != nil {
+					h.dnsObs.ObserveDNS(dnsDur, "failure")
+				}
 				return nil, err
 			}
 			if len(ips) == 0 {
+				if h.dnsObs != nil {
+					h.dnsObs.ObserveDNS(dnsDur, "failure")
+				}
 				return nil, fmt.Errorf("dns: no addresses for %s", host)
 			}
 			if isDNSBlocked(ips[0].IP) {
+				if h.dnsObs != nil {
+					h.dnsObs.ObserveDNS(dnsDur, "blocked")
+				}
 				return nil, fmt.Errorf("%w: %s resolved to %s", ErrDNSBlocked, host, ips[0].IP)
+			}
+			if h.dnsObs != nil {
+				h.dnsObs.ObserveDNS(dnsDur, "success")
 			}
 			// Dial the resolved IP directly to avoid double resolution
 			address = net.JoinHostPort(ips[0].IP.String(), port)

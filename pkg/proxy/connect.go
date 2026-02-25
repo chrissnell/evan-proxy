@@ -3,7 +3,6 @@ package proxy
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -138,7 +137,8 @@ func (h *Handler) connectTunnel(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx 
 		conn.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
 		h.logger.Log(logging.Entry{
 			Timestamp: start, ClientIP: clientIP, Method: "CONNECT",
-			Host: host, User: user, Status: 403, DurationMS: time.Since(start).Milliseconds(),
+			Host: host, User: user, Status: 403, Error: "acl denied",
+			DurationMS: time.Since(start).Milliseconds(),
 		})
 		return
 	}
@@ -146,18 +146,12 @@ func (h *Handler) connectTunnel(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx 
 	// Dial target
 	targetConn, err := h.dial(ctx, "tcp", host)
 	if err != nil {
-		status := 502
-		if errors.Is(err, ErrDNSBlocked) {
-			status = 523 // non-standard: Origin Is Unreachable (DNS blocked)
-		}
-		event := ""
-		if status == 523 {
-			event = "dns-block"
-		}
+		status, event := classifyDialError(err)
 		conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d Bad Gateway\r\nContent-Length: 0\r\n\r\n", status)))
 		h.logger.Log(logging.Entry{
 			Timestamp: start, Event: event, ClientIP: clientIP, Method: "CONNECT",
-			Host: host, User: user, Status: status, DurationMS: time.Since(start).Milliseconds(),
+			Host: host, User: user, Status: status, Error: err.Error(),
+			DurationMS: time.Since(start).Milliseconds(),
 		})
 		return
 	}

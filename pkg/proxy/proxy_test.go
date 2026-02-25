@@ -60,7 +60,7 @@ func setupProxy(t *testing.T) *Handler {
 	counter := stats.NewTrafficCounter(collector)
 	t.Cleanup(counter.Stop)
 
-	h := New(cfg, users, users, users, users, acl.AllowAll{}, limiter, logger, counter)
+	h := New(cfg, users, users, users, users, acl.AllowAll{}, limiter, logger, counter, nil)
 	return h
 }
 
