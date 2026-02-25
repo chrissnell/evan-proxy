@@ -108,7 +108,7 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { opacity: 0.8; }
 
 .container {
-  max-width: 860px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 2rem 1rem;
 }
