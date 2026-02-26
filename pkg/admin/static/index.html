@@ -57,8 +57,8 @@
       <h2>bandwidth &middot; 10 min</h2>
       <canvas id="traffic-canvas"></canvas>
       <div class="graph-legend">
-        <span class="legend-rx">rx</span>
-        <span class="legend-tx">tx</span>
+        <span class="legend-rx">in</span>
+        <span class="legend-tx">out</span>
       </div>
     </div>
     <div class="box">
@@ -489,7 +489,6 @@ function drawTraffic(buckets) {
 
   var maxRx = Math.max.apply(null, buckets.map(function(b) { return b.bw; })) || 1;
   var maxTx = Math.max.apply(null, buckets.map(function(b) { return b.br; })) || 1;
-  var maxBytes = Math.max(maxRx, maxTx);
   var barW = w / buckets.length;
   var pad = 14;
   var mid = h / 2;
@@ -509,7 +508,7 @@ function drawTraffic(buckets) {
   ctx.beginPath();
   ctx.moveTo(barW / 2, mid);
   buckets.forEach(function(b, i) {
-    var y = mid - (b.bw / maxBytes) * (mid - pad);
+    var y = mid - (b.bw / maxRx) * (mid - pad);
     ctx.lineTo(i * barW + barW / 2, y);
   });
   ctx.lineTo((buckets.length - 1) * barW + barW / 2, mid);
@@ -520,7 +519,7 @@ function drawTraffic(buckets) {
   ctx.lineWidth = 1;
   ctx.beginPath();
   buckets.forEach(function(b, i) {
-    var y = mid - (b.bw / maxBytes) * (mid - pad);
+    var y = mid - (b.bw / maxRx) * (mid - pad);
     var x = i * barW + barW / 2;
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
@@ -531,7 +530,7 @@ function drawTraffic(buckets) {
   ctx.beginPath();
   ctx.moveTo(barW / 2, mid);
   buckets.forEach(function(b, i) {
-    var y = mid + (b.br / maxBytes) * (mid - pad);
+    var y = mid + (b.br / maxTx) * (mid - pad);
     ctx.lineTo(i * barW + barW / 2, y);
   });
   ctx.lineTo((buckets.length - 1) * barW + barW / 2, mid);
@@ -542,7 +541,7 @@ function drawTraffic(buckets) {
   ctx.lineWidth = 1;
   ctx.beginPath();
   buckets.forEach(function(b, i) {
-    var y = mid + (b.br / maxBytes) * (mid - pad);
+    var y = mid + (b.br / maxTx) * (mid - pad);
     var x = i * barW + barW / 2;
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
@@ -552,8 +551,8 @@ function drawTraffic(buckets) {
   ctx.fillStyle = tc.fgDim;
   ctx.font = '10px Inconsolata';
   ctx.textAlign = 'left';
-  ctx.fillText('⬇ in ' + fmtBytes(maxBytes), 4, pad - 2);
-  ctx.fillText('⬆ out ' + fmtBytes(maxBytes), 4, h - 4);
+  ctx.fillText('⬇ in ' + fmtBytes(maxRx), 4, pad - 2);
+  ctx.fillText('⬆ out ' + fmtBytes(maxTx), 4, h - 4);
 }
 
 function drawRequests(buckets) {
