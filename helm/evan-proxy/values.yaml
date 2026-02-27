@@ -8,9 +8,20 @@ image:
 imagePullSecrets:
   - name: ghcr-secret
 
+# Logging — console and network are independent, both can run simultaneously
+logging:
+  # Console output (stdout) — always active
+  console:
+    format: "human"    # "human" or "json"
+  # Network logging — optional, runs alongside console
+  net:
+    mode: ""             # "json-udp" or "json-http", empty = disabled
+    address: ""          # UDP: "host:port", HTTP: "http://host:port/path"
+    batchSize: 100       # json-http only: max entries before flush
+    flushInterval: "5s"  # json-http only: max time between flushes
+
 # Proxy configuration
 proxy:
-  logFormat: "human"
   idleTimeout: "300s"
   httpTimeout: "30s"
   connectDialTimeout: "10s"

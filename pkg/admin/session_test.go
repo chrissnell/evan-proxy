@@ -1,15 +1,19 @@
 package admin
 
 import (
+	"io"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"evan-proxy/pkg/logging"
 )
 
 func newTestSessionStore(t *testing.T, ttl time.Duration) *SessionStore {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "sessions.db")
-	ss, err := NewSessionStore(dbPath, ttl)
+	lg := logging.New(logging.NewConsoleBackend(io.Discard, "human"))
+	ss, err := NewSessionStore(dbPath, ttl, lg)
 	if err != nil {
 		t.Fatal(err)
 	}

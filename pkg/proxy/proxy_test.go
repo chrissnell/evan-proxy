@@ -29,7 +29,7 @@ func setupProxy(t *testing.T) *Handler {
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "users.db")
-	users, err := userdb.Open(dbPath, "")
+	users, err := userdb.Open(dbPath, "", logging.New(logging.NewConsoleBackend(io.Discard, "human")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func setupProxy(t *testing.T) *Handler {
 
 	limiter := ratelimit.New(10, time.Minute)
 	t.Cleanup(limiter.Stop)
-	logger := logging.New(io.Discard, "human")
+	logger := logging.New(logging.NewConsoleBackend(io.Discard, "human"))
 
 	collector := stats.NewCollector()
 	t.Cleanup(collector.Stop)
@@ -244,7 +244,7 @@ func TestDNSBlockForward(t *testing.T) {
 	handler := setupProxy(t)
 
 	var logBuf bytes.Buffer
-	handler.logger = logging.New(&logBuf, "human")
+	handler.logger = logging.New(logging.NewConsoleBackend(&logBuf, "human"))
 
 	req := httptest.NewRequest("GET", "http://blocked.example.com/tracker.js", nil)
 	req.Header.Set("Proxy-Authorization", basicAuth("alice", "secret"))

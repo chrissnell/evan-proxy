@@ -6,7 +6,17 @@ metadata:
     {{- include "evan-proxy.labels" . | nindent 4 }}
 data:
   ADMIN_LISTEN: {{ .Values.admin.listen | quote }}
-  LOG_FORMAT: {{ .Values.proxy.logFormat | quote }}
+  # Console logging
+  LOG_FORMAT: {{ .Values.logging.console.format | quote }}
+  # Network logging (independent of console)
+  {{- if .Values.logging.net.mode }}
+  LOG_NET_MODE: {{ .Values.logging.net.mode | quote }}
+  LOG_NET_ADDR: {{ .Values.logging.net.address | quote }}
+  {{- if eq .Values.logging.net.mode "json-http" }}
+  LOG_NET_BATCH_SIZE: {{ .Values.logging.net.batchSize | quote }}
+  LOG_NET_FLUSH_INTERVAL: {{ .Values.logging.net.flushInterval | quote }}
+  {{- end }}
+  {{- end }}
   IDLE_TIMEOUT: {{ .Values.proxy.idleTimeout | quote }}
   HTTP_TIMEOUT: {{ .Values.proxy.httpTimeout | quote }}
   CONNECT_DIAL_TIMEOUT: {{ .Values.proxy.connectDialTimeout | quote }}

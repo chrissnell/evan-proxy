@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"evan-proxy/pkg/auth"
+	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/metrics"
 	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
@@ -21,8 +22,8 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, dbPath string) (*Server, error) {
-	sessions, err := NewSessionStore(dbPath, 24*time.Hour)
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, dbPath string, lg *logging.Logger) (*Server, error) {
+	sessions, err := NewSessionStore(dbPath, 24*time.Hour, lg)
 	if err != nil {
 		return nil, err
 	}
@@ -32,6 +33,7 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 		stats:    collector,
 		users:    users,
 		ports:    ports,
+		logger:   lg,
 	}
 
 	mux := http.NewServeMux()

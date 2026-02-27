@@ -4,15 +4,20 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"evan-proxy/pkg/logging"
 )
+
+var testLogger = logging.New(logging.NewConsoleBackend(io.Discard, "human"))
 
 func openTestDB(t *testing.T) *DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := Open(path, "")
+	db, err := Open(path, "", testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +239,7 @@ func TestSeedFromFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := Open(dbPath, seedPath)
+	db, err := Open(dbPath, seedPath, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,12 +266,12 @@ func TestSeedSkippedIfDBHasUsers(t *testing.T) {
 	writeFile(seedPath, []byte(seed))
 
 	// Create DB with existing user
-	db1, _ := Open(dbPath, "")
+	db1, _ := Open(dbPath, "", testLogger)
 	db1.Add("existing", "pass", 18081, 18090)
 	db1.Close()
 
 	// Re-open with seed — should NOT import
-	db2, _ := Open(dbPath, seedPath)
+	db2, _ := Open(dbPath, seedPath, testLogger)
 	defer db2.Close()
 
 	users, _ := db2.List()
@@ -306,7 +311,7 @@ func TestMigrationAddsColumns(t *testing.T) {
 	sqlDB.Close()
 
 	// Open with migration.
-	db, err := Open(dbPath, "")
+	db, err := Open(dbPath, "", testLogger)
 	if err != nil {
 		t.Fatalf("Open after migration: %v", err)
 	}
@@ -404,13 +409,13 @@ func TestDNSCacheLoadedOnOpen(t *testing.T) {
 	dbPath := filepath.Join(dir, "test.db")
 
 	// Create DB and set DNS config.
-	db1, _ := Open(dbPath, "")
+	db1, _ := Open(dbPath, "", testLogger)
 	db1.Add("alice", "pass", 18081, 18090)
 	db1.UpdateDNS("alice", "https://1.1.1.1/dns-query", "https")
 	db1.Close()
 
 	// Re-open — cache should be populated.
-	db2, err := Open(dbPath, "")
+	db2, err := Open(dbPath, "", testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +546,7 @@ func TestMigrationAddsPortColumn(t *testing.T) {
 	sqlDB.Close()
 
 	// Open with migration — should add port column
-	db, err := Open(dbPath, "")
+	db, err := Open(dbPath, "", testLogger)
 	if err != nil {
 		t.Fatalf("Open after migration: %v", err)
 	}

@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 )
@@ -26,11 +25,11 @@ func (h *Handler) StartUserListeners() error {
 
 	for port, username := range ports {
 		if port < h.cfg.UserPortMin || port > h.cfg.UserPortMax {
-			log.Printf("userports: ignoring out-of-range port %d for %q", port, username)
+			h.logger.Infof("userports", "ignoring out-of-range port %d for %q", port, username)
 			continue
 		}
 		if !h.enabledChecker.IsEnabled(username) {
-			log.Printf("userports: skipping disabled user %q (port %d)", username, port)
+			h.logger.Infof("userports", "skipping disabled user %q (port %d)", username, port)
 			continue
 		}
 		h.portUsers[port] = username
@@ -54,9 +53,9 @@ func (h *Handler) startListenerLocked(port int, username string) {
 	h.userServers[port] = srv
 
 	go func() {
-		log.Printf("userports: listening on :%d for %q", port, username)
+		h.logger.Infof("userports", "listening on :%d for %q", port, username)
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-			log.Printf("userports: port %d: %v", port, err)
+			h.logger.Errorf("userports", "port %d: %v", port, err)
 		}
 	}()
 }
@@ -75,7 +74,7 @@ func (h *Handler) StopUserListener(port int) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
-		log.Printf("userports: stopped listener on :%d", port)
+		h.logger.Infof("userports", "stopped listener on :%d", port)
 	}
 }
 
@@ -141,7 +140,7 @@ func (h *Handler) ShutdownUserListeners(ctx context.Context) {
 
 	for port, srv := range servers {
 		srv.Shutdown(ctx)
-		log.Printf("userports: stopped listener on :%d", port)
+		h.logger.Infof("userports", "stopped listener on :%d", port)
 	}
 }
 

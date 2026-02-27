@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,13 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/userdb"
 )
 
 func setupAPI(t *testing.T) *api {
 	t.Helper()
 	dir := t.TempDir()
-	users, err := userdb.Open(filepath.Join(dir, "users.db"), "")
+	lg := logging.New(logging.NewConsoleBackend(io.Discard, "human"))
+	users, err := userdb.Open(filepath.Join(dir, "users.db"), "", lg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +28,7 @@ func setupAPI(t *testing.T) *api {
 		t.Fatal(err)
 	}
 
-	sessions, err := NewSessionStore(filepath.Join(dir, "sessions.db"), 1*time.Hour)
+	sessions, err := NewSessionStore(filepath.Join(dir, "sessions.db"), 1*time.Hour, lg)
 	if err != nil {
 		t.Fatal(err)
 	}

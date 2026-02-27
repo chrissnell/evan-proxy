@@ -9,12 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"evan-proxy/pkg/logging"
 	"golang.org/x/crypto/argon2"
 	_ "modernc.org/sqlite"
 )
@@ -62,9 +62,10 @@ type DNSEntry struct {
 }
 
 type DB struct {
-	db    *sql.DB
-	mu    sync.RWMutex
-	cache map[string]cachedAuth
+	db     *sql.DB
+	logger *logging.Logger
+	mu     sync.RWMutex
+	cache  map[string]cachedAuth
 
 	dnsMu    sync.RWMutex
 	dnsCache map[string]DNSEntry // username -> dns config
@@ -72,7 +73,7 @@ type DB struct {
 
 // Open opens (or creates) the SQLite user database at path.
 // If the database is empty and seedFile is a valid JSON users file, it imports those users.
-func Open(path, seedFile string) (*DB, error) {
+func Open(path, seedFile string, lg *logging.Logger) (*DB, error) {
 	sqlDB, err := sql.Open("sqlite", path+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("opening user database: %w", err)
@@ -94,6 +95,7 @@ func Open(path, seedFile string) (*DB, error) {
 
 	udb := &DB{
 		db:       sqlDB,
+		logger:   lg,
 		cache:    make(map[string]cachedAuth),
 		dnsCache: make(map[string]DNSEntry),
 	}
@@ -106,7 +108,7 @@ func Open(path, seedFile string) (*DB, error) {
 	// Seed from JSON file if database is empty
 	if seedFile != "" {
 		if err := udb.seedFromFile(seedFile); err != nil {
-			log.Printf("userdb: seed from %s: %v", seedFile, err)
+			udb.logger.Errorf("userdb", "seed from %s: %v", seedFile, err)
 		}
 	}
 
@@ -150,25 +152,25 @@ func (d *DB) migrate() error {
 		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN dns_server TEXT NOT NULL DEFAULT ''"); err != nil {
 			return fmt.Errorf("adding dns_server column: %w", err)
 		}
-		log.Println("userdb: migrated — added dns_server column")
+		d.logger.Infof("userdb", "migrated — added dns_server column")
 	}
 	if !cols["dns_protocol"] {
 		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN dns_protocol TEXT NOT NULL DEFAULT ''"); err != nil {
 			return fmt.Errorf("adding dns_protocol column: %w", err)
 		}
-		log.Println("userdb: migrated — added dns_protocol column")
+		d.logger.Infof("userdb", "migrated — added dns_protocol column")
 	}
 	if !cols["port"] {
 		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN port INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return fmt.Errorf("adding port column: %w", err)
 		}
-		log.Println("userdb: migrated — added port column")
+		d.logger.Infof("userdb", "migrated — added port column")
 	}
 	if !cols["enabled"] {
 		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"); err != nil {
 			return fmt.Errorf("adding enabled column: %w", err)
 		}
-		log.Println("userdb: migrated — added enabled column")
+		d.logger.Infof("userdb", "migrated — added enabled column")
 	}
 	return nil
 }
@@ -534,7 +536,7 @@ func (d *DB) seedFromFile(path string) error {
 		if _, err := d.db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", u.Username, hash); err != nil {
 			return fmt.Errorf("seeding user %q: %w", u.Username, err)
 		}
-		log.Printf("userdb: seeded user %q from %s", u.Username, path)
+		d.logger.Infof("userdb", "seeded user %q from %s", u.Username, path)
 	}
 
 	return nil

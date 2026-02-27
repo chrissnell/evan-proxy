@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -175,7 +174,7 @@ func (h *Handler) connectTunnel(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx 
 		defer wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("panic in tunnel read goroutine (host=%s user=%s): %v", host, user, r)
+				h.logger.Errorf("proxy", "panic in tunnel read goroutine (host=%s user=%s): %v", host, user, r)
 			}
 		}()
 		io.Copy(readCounter, bufrw) // client -> target
@@ -189,7 +188,7 @@ func (h *Handler) connectTunnel(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx 
 		defer wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("panic in tunnel write goroutine (host=%s user=%s): %v", host, user, r)
+				h.logger.Errorf("proxy", "panic in tunnel write goroutine (host=%s user=%s): %v", host, user, r)
 			}
 		}()
 		io.Copy(writeCounter, targetConn) // target -> client

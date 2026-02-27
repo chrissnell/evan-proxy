@@ -1,9 +1,8 @@
 package logging
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
+	"os"
 	"sync"
 	"time"
 )
@@ -25,13 +24,16 @@ type Entry struct {
 
 type Logger struct {
 	mu        sync.Mutex
-	w         io.Writer
-	format    string
-	enc       *json.Encoder
+	backends  []Backend
 	observers []func(Entry)
 }
 
-// AddObserver registers a callback invoked on each Log call.
+// New creates a Logger that dispatches to all provided backends.
+func New(backends ...Backend) *Logger {
+	return &Logger{backends: backends}
+}
+
+// AddObserver registers a callback invoked on each access log entry.
 // Observers run under the logger mutex and must not block.
 func (l *Logger) AddObserver(fn func(Entry)) {
 	l.mu.Lock()
@@ -39,53 +41,57 @@ func (l *Logger) AddObserver(fn func(Entry)) {
 	l.observers = append(l.observers, fn)
 }
 
-func New(w io.Writer, format string) *Logger {
-	l := &Logger{w: w, format: format}
-	if format == "json" {
-		l.enc = json.NewEncoder(w)
-	}
-	return l
-}
-
+// Log dispatches an access log entry to all backends and observers.
 func (l *Logger) Log(e Entry) {
+	msg := Message{Access: &e}
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.format == "json" {
-		l.enc.Encode(e)
-	} else {
-		user := e.User
-		if user == "" {
-			user = "-"
-		}
-		uri := e.Host
-		if e.URI != "" {
-			uri = e.URI
-		}
-		event := e.Event
-		if event == "" {
-			event = "-"
-		}
-		errStr := ""
-		if e.Error != "" {
-			errStr = "  err=" + e.Error
-		}
-		fmt.Fprintf(l.w, "%s  %-5s  %-15s  %-7s  %-40s  %-16s  %d  %dms  %d/%d%s\n",
-			e.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"),
-			event,
-			e.ClientIP,
-			e.Method,
-			uri,
-			user,
-			e.Status,
-			e.DurationMS,
-			e.BytesRead,
-			e.BytesWritten,
-			errStr,
-		)
+	for _, b := range l.backends {
+		b.Log(msg)
 	}
-
 	for _, fn := range l.observers {
 		fn(e)
+	}
+}
+
+// ServerLog dispatches a server message to all backends.
+func (l *Logger) ServerLog(level, component, text string) {
+	msg := Message{Server: &ServerMessage{
+		Timestamp: time.Now(),
+		Level:     level,
+		Component: component,
+		Text:      text,
+	}}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for _, b := range l.backends {
+		b.Log(msg)
+	}
+}
+
+func (l *Logger) Infof(component, format string, args ...any) {
+	l.ServerLog("info", component, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Errorf(component, format string, args ...any) {
+	l.ServerLog("error", component, fmt.Sprintf(format, args...))
+}
+
+func (l *Logger) Fatalf(component, format string, args ...any) {
+	l.ServerLog("error", component, fmt.Sprintf(format, args...))
+	os.Exit(1)
+}
+
+// Close closes all backends.
+func (l *Logger) Close() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for _, b := range l.backends {
+		b.Close()
 	}
 }

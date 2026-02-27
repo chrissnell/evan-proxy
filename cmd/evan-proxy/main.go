@@ -27,16 +27,37 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	users, err := userdb.Open(cfg.ProxyDBPath, cfg.ProxyUsersFile)
+	// Build logger — console backend is always active
+	backends := []logging.Backend{
+		logging.NewConsoleBackend(os.Stdout, cfg.LogFormat),
+	}
+
+	// Network logging (independent of console)
+	switch cfg.LogNetMode {
+	case "json-udp":
+		udp, err := logging.NewJSONUDPBackend(cfg.LogNetAddr)
+		if err != nil {
+			log.Fatalf("json-udp logger: %v", err)
+		}
+		backends = append(backends, udp)
+	case "json-http":
+		backends = append(backends, logging.NewJSONHTTPBackend(
+			cfg.LogNetAddr, cfg.LogNetBatchSize, cfg.LogNetFlushInterval,
+		))
+	}
+
+	logger := logging.New(backends...)
+	defer logger.Close()
+
+	users, err := userdb.Open(cfg.ProxyDBPath, cfg.ProxyUsersFile, logger)
 	if err != nil {
-		log.Fatalf("userdb: %v", err)
+		logger.Fatalf("userdb", "%v", err)
 	}
 	defer users.Close()
 
 	adminAuth := auth.NewAdminAuth(cfg.AdminUser, cfg.AdminPassword)
 	a := acl.AllowAll{}
 	limiter := ratelimit.New(cfg.AuthFailRateLimit, cfg.AuthFailWindow)
-	logger := logging.New(os.Stdout, cfg.LogFormat)
 	collector := stats.NewCollector()
 	logger.AddObserver(collector.Observe)
 
@@ -46,14 +67,14 @@ func main() {
 	counter := stats.NewTrafficCounter(collector)
 	counter.AddObserver(m.ObserveLiveBytes)
 	proxyHandler := proxy.New(cfg, users, users, users, users, a, limiter, logger, counter, m)
-	adminServer, err := admin.NewServer(adminAuth, collector, users, proxyHandler, m, cfg.ProxyDBPath)
+	adminServer, err := admin.NewServer(adminAuth, collector, users, proxyHandler, m, cfg.ProxyDBPath, logger)
 	if err != nil {
-		log.Fatalf("admin: %v", err)
+		logger.Fatalf("admin", "%v", err)
 	}
 
 	// Per-user dedicated port listeners
 	if err := proxyHandler.StartUserListeners(); err != nil {
-		log.Fatalf("user listeners: %v", err)
+		logger.Fatalf("proxy", "user listeners: %v", err)
 	}
 
 	// Admin listener (no WriteTimeout -- SSE log streaming needs long-lived responses)
@@ -65,9 +86,9 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("admin listening on %s", cfg.AdminListen)
+		logger.Infof("admin", "listening on %s", cfg.AdminListen)
 		if err := adminSrv.ListenAndServe(); err != http.ErrServerClosed {
-			log.Fatalf("admin: %v", err)
+			logger.Fatalf("admin", "%v", err)
 		}
 	}()
 
@@ -76,7 +97,7 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 
-	log.Println("shutting down...")
+	logger.Infof("main", "shutting down...")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

@@ -39,8 +39,14 @@ type Config struct {
 	UserPortMin int // first port in range (inclusive)
 	UserPortMax int // last port in range (inclusive)
 
-	// Logging
+	// Logging — console
 	LogFormat string // "json" or "human"
+
+	// Logging — network (optional, independent of console)
+	LogNetMode          string        // "json-udp" or "json-http", empty = disabled
+	LogNetAddr          string        // UDP: "host:port", HTTP: "http://host:port/path"
+	LogNetBatchSize     int           // json-http only: max entries before flush
+	LogNetFlushInterval time.Duration // json-http only: max time between flushes
 }
 
 func Load() (*Config, error) {
@@ -61,6 +67,10 @@ func Load() (*Config, error) {
 		UserPortMin:        envInt("USER_PORT_MIN", 8081),
 		UserPortMax:        envInt("USER_PORT_MAX", 8090),
 		LogFormat:          envOr("LOG_FORMAT", "human"),
+		LogNetMode:          os.Getenv("LOG_NET_MODE"),
+		LogNetAddr:          os.Getenv("LOG_NET_ADDR"),
+		LogNetBatchSize:     envInt("LOG_NET_BATCH_SIZE", 100),
+		LogNetFlushInterval: envDuration("LOG_NET_FLUSH_INTERVAL", 5*time.Second),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -92,6 +102,14 @@ func (c *Config) validate() error {
 	}
 	if c.UserPortMin > c.UserPortMax {
 		return fmt.Errorf("USER_PORT_MIN (%d) must be <= USER_PORT_MAX (%d)", c.UserPortMin, c.UserPortMax)
+	}
+	switch c.LogNetMode {
+	case "", "json-udp", "json-http":
+	default:
+		return fmt.Errorf("LOG_NET_MODE must be 'json-udp', 'json-http', or empty, got %q", c.LogNetMode)
+	}
+	if c.LogNetMode != "" && c.LogNetAddr == "" {
+		return fmt.Errorf("LOG_NET_ADDR is required when LOG_NET_MODE is %q", c.LogNetMode)
 	}
 	return nil
 }

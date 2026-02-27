@@ -2,3 +2,4 @@ scratch/
 /evan-proxy
 *.exe
 CLAUDE.md
+.DS_Store

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"evan-proxy/pkg/auth"
 	edns "evan-proxy/pkg/dns"
+	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
 )
@@ -31,6 +31,7 @@ type api struct {
 	stats    *stats.Collector
 	users    *userdb.DB
 	ports    PortManager
+	logger   *logging.Logger
 }
 
 type loginRequest struct {
@@ -60,7 +61,7 @@ func (a *api) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if err := a.auth.Check(req.Username, req.Password); err != nil {
-		log.Printf("admin login failed from %s: %v", r.RemoteAddr, err)
+		a.logger.Errorf("admin", "login failed from %s: %v", r.RemoteAddr, err)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -140,7 +141,7 @@ func (a *api) handleUsers(w http.ResponseWriter, r *http.Request) {
 func (a *api) handleListUsers(w http.ResponseWriter, _ *http.Request) {
 	users, err := a.users.List()
 	if err != nil {
-		log.Printf("list users: %v", err)
+		a.logger.Errorf("admin", "list users: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -170,14 +171,14 @@ func (a *api) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "no ports available", http.StatusConflict)
 			return
 		}
-		log.Printf("create user: %v", err)
+		a.logger.Errorf("admin", "create user: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	// Start the per-user port listener
 	if err := a.ports.UpdateUserPort(req.Username, port); err != nil {
-		log.Printf("start user listener: %v", err)
+		a.logger.Errorf("admin", "start user listener: %v", err)
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -204,7 +205,7 @@ func (a *api) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("delete user: %v", err)
+		a.logger.Errorf("admin", "delete user: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -232,7 +233,7 @@ func (a *api) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("change password: %v", err)
+		a.logger.Errorf("admin", "change password: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -270,7 +271,7 @@ func (a *api) handleUpdatePort(w http.ResponseWriter, r *http.Request) {
 		// Check if port is already assigned to a different user
 		owner, err := a.users.PortOwner(req.Port)
 		if err != nil {
-			log.Printf("check port owner: %v", err)
+			a.logger.Errorf("admin", "check port owner: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -285,7 +286,7 @@ func (a *api) handleUpdatePort(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("update port: %v", err)
+		a.logger.Errorf("admin", "update port: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -318,7 +319,7 @@ func (a *api) handleSetEnabled(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("set enabled: %v", err)
+		a.logger.Errorf("admin", "set enabled: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -377,7 +378,7 @@ func (a *api) handleUpdateDNS(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("update dns: %v", err)
+		a.logger.Errorf("admin", "update dns: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

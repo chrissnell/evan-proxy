@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"time"
 
+	"evan-proxy/pkg/logging"
 	_ "modernc.org/sqlite"
 )
 
@@ -15,12 +15,13 @@ const sessionCookie = "evan-proxy-session"
 
 // SessionStore manages admin sessions in SQLite.
 type SessionStore struct {
-	db  *sql.DB
-	ttl time.Duration
-	stop chan struct{}
+	db     *sql.DB
+	ttl    time.Duration
+	stop   chan struct{}
+	logger *logging.Logger
 }
 
-func NewSessionStore(dbPath string, ttl time.Duration) (*SessionStore, error) {
+func NewSessionStore(dbPath string, ttl time.Duration, lg *logging.Logger) (*SessionStore, error) {
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("opening session database: %w", err)
@@ -37,7 +38,7 @@ func NewSessionStore(dbPath string, ttl time.Duration) (*SessionStore, error) {
 		return nil, fmt.Errorf("creating sessions table: %w", err)
 	}
 
-	ss := &SessionStore{db: db, ttl: ttl, stop: make(chan struct{})}
+	ss := &SessionStore{db: db, ttl: ttl, stop: make(chan struct{}), logger: lg}
 	go ss.cleanup()
 	return ss, nil
 }
@@ -91,7 +92,7 @@ func (ss *SessionStore) cleanup() {
 			result, err := ss.db.Exec(`DELETE FROM admin_sessions WHERE expires_at < ?`, time.Now())
 			if err == nil {
 				if n, _ := result.RowsAffected(); n > 0 {
-					log.Printf("cleaned up %d expired admin sessions", n)
+					ss.logger.Infof("admin", "cleaned up %d expired admin sessions", n)
 				}
 			}
 		case <-ss.stop:
