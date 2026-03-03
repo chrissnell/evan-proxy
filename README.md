@@ -127,7 +127,7 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `service.annotations` | object | `{}` | Service annotations |
 | `service.adminPort` | int | `9090` | Service port for admin interface |
 | `ingress.enabled` | bool | `false` | Enable ingress (e.g. for admin UI) |
-| `ingress.className` | string | `"cloudflare-tunnel"` | Ingress class name |
+| `ingress.className` | string | `""` | Ingress class name |
 | `ingress.hosts` | list | | Ingress host rules |
 | `resources.requests.cpu` | string | `"100m"` | CPU request |
 | `resources.requests.memory` | string | `"64Mi"` | Memory request |

@@ -74,10 +74,10 @@ networkPolicy:
   # Allow CONNECT tunnels to reach any port (not just 80/443)
   allowAllEgress: true
 
-# Ingress (e.g. for admin UI via Cloudflare tunnel)
+# Ingress (e.g. for admin UI)
 ingress:
   enabled: false
-  className: cloudflare-tunnel
+  className: ""
   annotations: {}
   hosts:
     - host: proxy.example.com
