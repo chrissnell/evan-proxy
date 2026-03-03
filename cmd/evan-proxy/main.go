@@ -21,6 +21,9 @@ import (
 	"evan-proxy/pkg/userdb"
 )
 
+// Version is set at build time via -ldflags.
+var Version = "dev"
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -67,7 +70,7 @@ func main() {
 	counter := stats.NewTrafficCounter(collector)
 	counter.AddObserver(m.ObserveLiveBytes)
 	proxyHandler := proxy.New(cfg, users, users, users, users, a, limiter, logger, counter, m)
-	adminServer, err := admin.NewServer(adminAuth, collector, users, proxyHandler, m, cfg.ProxyDBPath, logger)
+	adminServer, err := admin.NewServer(adminAuth, collector, users, proxyHandler, m, cfg.ProxyDBPath, logger, Version)
 	if err != nil {
 		logger.Fatalf("admin", "%v", err)
 	}

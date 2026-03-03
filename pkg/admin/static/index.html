@@ -71,6 +71,10 @@
 
 </div>
 
+<div class="footer">
+  <a id="version-link" href="https://github.com/chrissnell/evan-proxy">evan-proxy</a>
+</div>
+
 <script>
 // --- Theme ---
 function getThemeColors() {
@@ -636,6 +640,11 @@ function escHtml(s) {
 function escAttr(s) {
   return s.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
+
+// --- Version ---
+fetch('/api/version').then(function(r) { return r.json(); }).then(function(d) {
+  document.getElementById('version-link').textContent = 'evan-proxy ' + d.version;
+});
 </script>
 </body>
 </html>

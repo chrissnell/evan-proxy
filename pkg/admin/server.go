@@ -2,6 +2,7 @@ package admin
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/pprof"
@@ -22,7 +23,7 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, dbPath string, lg *logging.Logger) (*Server, error) {
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, dbPath string, lg *logging.Logger, version string) (*Server, error) {
 	sessions, err := NewSessionStore(dbPath, 24*time.Hour, lg)
 	if err != nil {
 		return nil, err
@@ -55,6 +56,12 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 	mux.HandleFunc("/api/users/dns", a.requireSession(a.handleUpdateDNS))
 	mux.HandleFunc("/api/users/dns/test", a.requireSession(a.handleTestDNS))
 	mux.HandleFunc("/api/users/enabled", a.requireSession(a.handleSetEnabled))
+
+	// Version (no auth)
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"version":%q}`, version)
+	})
 
 	// Prometheus metrics (no auth — standard for scraping)
 	mux.Handle("/metrics", m.Handler())
