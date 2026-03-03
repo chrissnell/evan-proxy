@@ -11,9 +11,6 @@ type Config struct {
 	// Proxy user database (SQLite)
 	ProxyDBPath string
 
-	// Optional JSON users file for initial seeding
-	ProxyUsersFile string
-
 	// Admin listener
 	AdminListen string
 
@@ -52,7 +49,6 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		ProxyDBPath:        envOr("PROXY_DB_PATH", "/data/evan-proxy/users.db"),
-		ProxyUsersFile:     os.Getenv("PROXY_USERS_FILE"),
 		AdminListen:        envOr("ADMIN_LISTEN", ":9090"),
 		AdminUser:          os.Getenv("ADMIN_USER"),
 		AdminPassword:      os.Getenv("ADMIN_PASSWORD"),

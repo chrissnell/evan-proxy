@@ -54,8 +54,6 @@ spec:
           env:
             - name: PROXY_DB_PATH
               value: /data/evan-proxy/users.db
-            - name: PROXY_USERS_FILE
-              value: /etc/evan-proxy/users.json
             - name: ADMIN_USER
               valueFrom:
                 secretKeyRef:
@@ -101,9 +99,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data/evan-proxy
-            - name: seed
-              mountPath: /etc/evan-proxy
-              readOnly: true
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -112,10 +107,3 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        - name: seed
-          secret:
-            secretName: {{ include "evan-proxy.secretName" . }}
-            defaultMode: 0400
-            items:
-              - key: users.json
-                path: users.json

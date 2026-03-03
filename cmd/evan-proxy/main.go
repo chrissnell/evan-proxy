@@ -49,7 +49,7 @@ func main() {
 	logger := logging.New(backends...)
 	defer logger.Close()
 
-	users, err := userdb.Open(cfg.ProxyDBPath, cfg.ProxyUsersFile, logger)
+	users, err := userdb.Open(cfg.ProxyDBPath, logger)
 	if err != nil {
 		logger.Fatalf("userdb", "%v", err)
 	}

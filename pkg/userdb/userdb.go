@@ -6,10 +6,8 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -72,8 +70,7 @@ type DB struct {
 }
 
 // Open opens (or creates) the SQLite user database at path.
-// If the database is empty and seedFile is a valid JSON users file, it imports those users.
-func Open(path, seedFile string, lg *logging.Logger) (*DB, error) {
+func Open(path string, lg *logging.Logger) (*DB, error) {
 	sqlDB, err := sql.Open("sqlite", path+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("opening user database: %w", err)
@@ -103,13 +100,6 @@ func Open(path, seedFile string, lg *logging.Logger) (*DB, error) {
 	if err := udb.migrate(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("migrating database: %w", err)
-	}
-
-	// Seed from JSON file if database is empty
-	if seedFile != "" {
-		if err := udb.seedFromFile(seedFile); err != nil {
-			udb.logger.Errorf("userdb", "seed from %s: %v", seedFile, err)
-		}
 	}
 
 	if err := udb.loadDNSCache(); err != nil {
@@ -493,53 +483,6 @@ func (d *DB) Check(proxyAuthHeader string) (string, error) {
 	d.mu.Unlock()
 
 	return user, nil
-}
-
-// seedFromFile imports users from a JSON file if the database is empty.
-func (d *DB) seedFromFile(path string) error {
-	// Check if DB already has users
-	var count int
-	if err := d.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	var f struct {
-		Users []struct {
-			Username string `json:"username"`
-			Password string `json:"password"`
-		} `json:"users"`
-	}
-	if err := json.Unmarshal(data, &f); err != nil {
-		return fmt.Errorf("parsing seed file: %w", err)
-	}
-
-	for _, u := range f.Users {
-		if u.Username == "" || u.Password == "" {
-			continue
-		}
-		// Seed users get port 0 — ports are assigned via the admin UI
-		hash, err := hashPassword(u.Password)
-		if err != nil {
-			return fmt.Errorf("hashing password for %q: %w", u.Username, err)
-		}
-		if _, err := d.db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", u.Username, hash); err != nil {
-			return fmt.Errorf("seeding user %q: %w", u.Username, err)
-		}
-		d.logger.Infof("userdb", "seeded user %q from %s", u.Username, path)
-	}
-
-	return nil
 }
 
 // hashPassword creates an argon2id hash with a random salt.

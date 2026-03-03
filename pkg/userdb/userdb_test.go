@@ -17,7 +17,7 @@ var testLogger = logging.New(logging.NewConsoleBackend(io.Discard, "human"))
 func openTestDB(t *testing.T) *DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := Open(path, "", testLogger)
+	db, err := Open(path, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,58 +228,6 @@ func TestChangePasswordUnknown(t *testing.T) {
 	}
 }
 
-func TestSeedFromFile(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	seedPath := filepath.Join(dir, "users.json")
-
-	// Write seed file
-	seed := `{"users":[{"username":"alice","password":"pass1"},{"username":"bob","password":"pass2"}]}`
-	if err := writeFile(seedPath, []byte(seed)); err != nil {
-		t.Fatal(err)
-	}
-
-	db, err := Open(dbPath, seedPath, testLogger)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	users, _ := db.List()
-	if len(users) != 2 {
-		t.Fatalf("expected 2 seeded users, got %d", len(users))
-	}
-
-	// Seeded users should be authenticable
-	user, err := db.Check(makeBasicAuth("alice", "pass1"))
-	if err != nil || user != "alice" {
-		t.Errorf("seeded user auth failed: %v", err)
-	}
-}
-
-func TestSeedSkippedIfDBHasUsers(t *testing.T) {
-	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "test.db")
-	seedPath := filepath.Join(dir, "users.json")
-
-	seed := `{"users":[{"username":"seed","password":"pass"}]}`
-	writeFile(seedPath, []byte(seed))
-
-	// Create DB with existing user
-	db1, _ := Open(dbPath, "", testLogger)
-	db1.Add("existing", "pass", 18081, 18090)
-	db1.Close()
-
-	// Re-open with seed — should NOT import
-	db2, _ := Open(dbPath, seedPath, testLogger)
-	defer db2.Close()
-
-	users, _ := db2.List()
-	if len(users) != 1 || users[0].Username != "existing" {
-		t.Errorf("seed should be skipped when DB has users, got: %+v", users)
-	}
-}
-
 func TestHashAndVerify(t *testing.T) {
 	hash, err := hashPassword("testpass")
 	if err != nil {
@@ -311,7 +259,7 @@ func TestMigrationAddsColumns(t *testing.T) {
 	sqlDB.Close()
 
 	// Open with migration.
-	db, err := Open(dbPath, "", testLogger)
+	db, err := Open(dbPath, testLogger)
 	if err != nil {
 		t.Fatalf("Open after migration: %v", err)
 	}
@@ -409,13 +357,13 @@ func TestDNSCacheLoadedOnOpen(t *testing.T) {
 	dbPath := filepath.Join(dir, "test.db")
 
 	// Create DB and set DNS config.
-	db1, _ := Open(dbPath, "", testLogger)
+	db1, _ := Open(dbPath, testLogger)
 	db1.Add("alice", "pass", 18081, 18090)
 	db1.UpdateDNS("alice", "https://1.1.1.1/dns-query", "https")
 	db1.Close()
 
 	// Re-open — cache should be populated.
-	db2, err := Open(dbPath, "", testLogger)
+	db2, err := Open(dbPath, testLogger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +494,7 @@ func TestMigrationAddsPortColumn(t *testing.T) {
 	sqlDB.Close()
 
 	// Open with migration — should add port column
-	db, err := Open(dbPath, "", testLogger)
+	db, err := Open(dbPath, testLogger)
 	if err != nil {
 		t.Fatalf("Open after migration: %v", err)
 	}

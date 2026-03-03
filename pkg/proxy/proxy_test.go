@@ -29,7 +29,7 @@ func setupProxy(t *testing.T) *Handler {
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "users.db")
-	users, err := userdb.Open(dbPath, "", logging.New(logging.NewConsoleBackend(io.Discard, "human")))
+	users, err := userdb.Open(dbPath, logging.New(logging.NewConsoleBackend(io.Discard, "human")))
 	if err != nil {
 		t.Fatal(err)
 	}

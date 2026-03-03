@@ -39,11 +39,6 @@ persistence:
   size: 1Gi
   storageClass: ""  # empty = default StorageClass
 
-# Proxy users seed (imported into SQLite on first run if DB is empty)
-proxyUsers:
-  - username: "proxy"
-    password: "CHANGEME"
-
 # Admin interface
 admin:
   listen: ":9090"
@@ -53,7 +48,7 @@ admin:
   passwordHash: "$2y$10$CHANGEME"
 
 # Use an existing secret instead of creating one
-# Secret must contain: users.json, ADMIN_USER, ADMIN_PASSWORD
+# Secret must contain: ADMIN_USER, ADMIN_PASSWORD
 existingSecret: ""
 
 # Service

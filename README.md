@@ -60,7 +60,6 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PROXY_DB_PATH` | `/data/evan-proxy/users.db` | Path to SQLite user database |
-| `PROXY_USERS_FILE` | | Path to JSON seed file for initial user import |
 | `ADMIN_LISTEN` | `:9090` | Admin interface listen address |
 | `DNS_SERVER` | | Custom DNS resolver (e.g. `1.1.1.1:53`), empty uses system default |
 | `DNS_PROTOCOL` | `plain` | DNS protocol: `plain`, `tls` (DoT), or `https` (DoH) |
@@ -73,21 +72,6 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `AUTH_FAIL_RATE_LIMIT` | `5` | Failed auth attempts before rate limiting kicks in |
 | `AUTH_FAIL_WINDOW` | `60s` | Sliding window for rate limiting |
 | `LOG_FORMAT` | `human` | Log format: `json` or `human` |
-
-### User Seed File
-
-On first run, if the SQLite database is empty and `PROXY_USERS_FILE` is set, users are imported from the JSON seed file:
-
-```json
-{
-  "users": [
-    {"username": "alice", "password": "secretpass"},
-    {"username": "bob", "password": "otherpass"}
-  ]
-}
-```
-
-After initial import, users are managed through the admin web UI and stored in the SQLite database.
 
 ## Building
 
@@ -131,11 +115,10 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `proxy.dnsProtocol` | string | `""` | DNS protocol: `plain`, `tls`, or `https` (empty = plain) |
 | `proxy.userPortMin` | int | `8080` | First per-user dedicated proxy port |
 | `proxy.userPortMax` | int | `8090` | Last per-user dedicated proxy port |
-| `proxyUsers` | list | `[{username: "proxy", password: "CHANGEME"}]` | Seed user credentials (imported on first run) |
 | `admin.listen` | string | `":9090"` | Admin interface listen address |
 | `admin.user` | string | `"admin"` | Admin username |
 | `admin.passwordHash` | string | `"$2y$10$CHANGEME"` | Admin password as bcrypt hash |
-| `existingSecret` | string | `""` | Use a pre-created Secret instead of generating one. Must contain keys: `users.json`, `ADMIN_USER`, `ADMIN_PASSWORD` |
+| `existingSecret` | string | `""` | Use a pre-created Secret instead of generating one. Must contain keys: `ADMIN_USER`, `ADMIN_PASSWORD` |
 | `persistence.enabled` | bool | `true` | Enable persistent storage for SQLite database |
 | `persistence.size` | string | `"1Gi"` | PVC size |
 | `persistence.storageClass` | string | `""` | StorageClass (empty = default) |

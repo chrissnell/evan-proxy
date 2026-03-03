@@ -19,7 +19,7 @@ func setupAPI(t *testing.T) *api {
 	t.Helper()
 	dir := t.TempDir()
 	lg := logging.New(logging.NewConsoleBackend(io.Discard, "human"))
-	users, err := userdb.Open(filepath.Join(dir, "users.db"), "", lg)
+	users, err := userdb.Open(filepath.Join(dir, "users.db"), lg)
 	if err != nil {
 		t.Fatal(err)
 	}
