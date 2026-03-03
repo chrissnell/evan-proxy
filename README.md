@@ -1,3 +1,5 @@
+![evan-proxy admin UI](assets/screenshot.png)
+
 # evan-proxy
 
 I built this proxy out of parental necessity.  I tried all of the prominent child web filtering solutions and they were all terrible and expensive.
@@ -35,10 +37,6 @@ To make this work, follow this plan:
 - DNS-over-TLS (DoT) and DNS-over-HTTPS (DoH) support
 - DNS-level block detection (returns 523 for DNS-blocked domains)
 - Prometheus metrics endpoint (`/metrics`)
-
-## Screenshot
-
-![evan-proxy admin UI](assets/screenshot.png)
 
 ## Configuration
 
