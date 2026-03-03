@@ -532,3 +532,82 @@ button:hover {
 .footer { text-align: center; padding: 1.2em 0 1.5em; font-size: 0.85em; }
 .footer a { color: var(--fg-dim); text-decoration: none; }
 .footer a:hover { color: var(--fg-muted); }
+
+/* --- Mobile responsive --- */
+@media (max-width: 768px) {
+  .container { padding: 1rem 0.5rem; }
+  .box { padding: 1rem; }
+
+  /* Stack grid columns */
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  /* Log tail: allow horizontal scroll */
+  #log-tail {
+    font-size: 0.62rem;
+    height: 180px;
+    overflow-x: auto;
+  }
+
+  /* User table: hide less important columns, shrink text */
+  .user-table { font-size: 0.72rem; }
+  .user-table th:nth-child(2),
+  .user-table td:nth-child(2) { display: none; } /* hide created */
+  .user-table th:nth-child(3),
+  .user-table td:nth-child(3) { display: none; } /* hide port */
+  .user-table th:nth-child(4),
+  .user-table td:nth-child(4) { display: none; } /* hide dns */
+
+  .user-table th { padding: 0.25rem 0.4rem 0.25rem 0; }
+  .user-table td { padding: 0.35rem 0.4rem 0.35rem 0; }
+
+  /* Action buttons stack or wrap */
+  .user-actions {
+    white-space: normal;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+    justify-content: flex-end;
+  }
+  .user-actions .btn-sm { margin-left: 0; }
+
+  /* Inline edit forms wrap */
+  .inline-edit-form {
+    flex-wrap: wrap;
+  }
+  .inline-input { max-width: none; }
+  .edit-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  /* DNS proto group stays inline */
+  .dns-proto-group { flex-shrink: 0; }
+
+  /* Add user form stacks */
+  .user-add-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .user-add-form input { width: 100%; }
+  .user-add-form button { width: 100%; }
+
+  /* Canvas graphs */
+  #traffic-canvas,
+  #requests-canvas { height: 100px; }
+}
+
+@media (max-width: 480px) {
+  h1 { font-size: 1.1rem; }
+  .box { padding: 0.75rem; }
+
+  /* Even smaller table text */
+  .user-table { font-size: 0.68rem; }
+  .btn-sm { font-size: 0.65rem; padding: 0.15rem 0.35rem; }
+
+  #log-tail { font-size: 0.58rem; height: 150px; }
+  #traffic-canvas,
+  #requests-canvas { height: 80px; }
+}
