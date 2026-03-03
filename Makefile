@@ -21,7 +21,7 @@ docker-push:
 	docker buildx build --platform $(PLATFORM) -t $(IMAGE):$(VERSION) --push .
 
 helm:
-	helm upgrade evan-proxy helm/evan-proxy -n evan-proxy -f ~/kube/evan-proxy/values.yaml
+	helm upgrade evan-proxy helm/evan-proxy -n evan-proxy -f ~/kube/apps/evan-proxy/values.yaml
 
 deploy: docker-push
-	helm upgrade evan-proxy helm/evan-proxy -n evan-proxy -f ~/kube/evan-proxy/values.yaml --set image.tag=$(VERSION)
+	helm upgrade evan-proxy helm/evan-proxy -n evan-proxy -f ~/kube/apps/evan-proxy/values.yaml --set image.tag=$(VERSION)
