@@ -99,7 +99,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data/evan-proxy
+            - name: localtime
+              mountPath: /etc/localtime
+              readOnly: true
       volumes:
+        - name: localtime
+          hostPath:
+            path: /etc/localtime
+            type: File
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
