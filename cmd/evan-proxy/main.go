@@ -70,10 +70,7 @@ func main() {
 	counter := stats.NewTrafficCounter(collector)
 	counter.AddObserver(m.ObserveLiveBytes)
 	proxyHandler := proxy.New(cfg, users, users, users, users, users, a, limiter, logger, counter, m)
-	adminServer, err := admin.NewServer(adminAuth, collector, users, proxyHandler, m, cfg.ProxyDBPath, logger, Version)
-	if err != nil {
-		logger.Fatalf("admin", "%v", err)
-	}
+	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version)
 
 	// Per-user dedicated port listeners
 	if err := proxyHandler.StartUserListeners(); err != nil {

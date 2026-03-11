@@ -2,45 +2,38 @@ package admin
 
 import (
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
-	"fmt"
+	"sync"
 	"time"
 
 	"evan-proxy/pkg/logging"
-	_ "modernc.org/sqlite"
 )
 
 const sessionCookie = "evan-proxy-session"
 
-// SessionStore manages admin sessions in SQLite.
+type session struct {
+	expiresAt time.Time
+}
+
+// SessionStore manages admin sessions in memory.
 type SessionStore struct {
-	db     *sql.DB
 	ttl    time.Duration
 	stop   chan struct{}
 	logger *logging.Logger
+
+	mu       sync.RWMutex
+	sessions map[string]session
 }
 
-func NewSessionStore(dbPath string, ttl time.Duration, lg *logging.Logger) (*SessionStore, error) {
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
-	if err != nil {
-		return nil, fmt.Errorf("opening session database: %w", err)
+func NewSessionStore(ttl time.Duration, lg *logging.Logger) *SessionStore {
+	ss := &SessionStore{
+		ttl:      ttl,
+		stop:     make(chan struct{}),
+		logger:   lg,
+		sessions: make(map[string]session),
 	}
-	db.SetMaxOpenConns(1)
-
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS admin_sessions (
-			token      TEXT PRIMARY KEY,
-			expires_at DATETIME NOT NULL
-		)
-	`); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("creating sessions table: %w", err)
-	}
-
-	ss := &SessionStore{db: db, ttl: ttl, stop: make(chan struct{}), logger: lg}
 	go ss.cleanup()
-	return ss, nil
+	return ss
 }
 
 // Create generates a new session token.
@@ -49,37 +42,48 @@ func (ss *SessionStore) Create() string {
 	rand.Read(b)
 	token := hex.EncodeToString(b)
 
-	expiresAt := time.Now().Add(ss.ttl)
-	ss.db.Exec(`INSERT INTO admin_sessions (token, expires_at) VALUES (?, ?)`, token, expiresAt)
+	ss.mu.Lock()
+	ss.sessions[token] = session{expiresAt: time.Now().Add(ss.ttl)}
+	ss.mu.Unlock()
+
 	return token
 }
 
 // Validate checks if a session token is valid and renews its expiration.
 func (ss *SessionStore) Validate(token string) bool {
-	var expiresAt time.Time
-	err := ss.db.QueryRow(`SELECT expires_at FROM admin_sessions WHERE token = ?`, token).Scan(&expiresAt)
-	if err != nil {
+	now := time.Now()
+
+	ss.mu.RLock()
+	s, found := ss.sessions[token]
+	ss.mu.RUnlock()
+
+	if !found {
 		return false
 	}
-	if time.Now().After(expiresAt) {
-		ss.db.Exec(`DELETE FROM admin_sessions WHERE token = ?`, token)
+	if now.After(s.expiresAt) {
+		ss.mu.Lock()
+		delete(ss.sessions, token)
+		ss.mu.Unlock()
 		return false
 	}
+
 	// Sliding expiration
-	newExpiry := time.Now().Add(ss.ttl)
-	ss.db.Exec(`UPDATE admin_sessions SET expires_at = ? WHERE token = ?`, newExpiry, token)
+	ss.mu.Lock()
+	ss.sessions[token] = session{expiresAt: now.Add(ss.ttl)}
+	ss.mu.Unlock()
 	return true
 }
 
 // Delete removes a session.
 func (ss *SessionStore) Delete(token string) {
-	ss.db.Exec(`DELETE FROM admin_sessions WHERE token = ?`, token)
+	ss.mu.Lock()
+	delete(ss.sessions, token)
+	ss.mu.Unlock()
 }
 
-// Stop terminates the background cleanup goroutine and closes the database.
+// Stop terminates the background cleanup goroutine.
 func (ss *SessionStore) Stop() {
 	close(ss.stop)
-	ss.db.Close()
 }
 
 func (ss *SessionStore) cleanup() {
@@ -89,12 +93,14 @@ func (ss *SessionStore) cleanup() {
 	for {
 		select {
 		case <-ticker.C:
-			result, err := ss.db.Exec(`DELETE FROM admin_sessions WHERE expires_at < ?`, time.Now())
-			if err == nil {
-				if n, _ := result.RowsAffected(); n > 0 {
-					ss.logger.Infof("admin", "cleaned up %d expired admin sessions", n)
+			now := time.Now()
+			ss.mu.Lock()
+			for token, s := range ss.sessions {
+				if now.After(s.expiresAt) {
+					delete(ss.sessions, token)
 				}
 			}
+			ss.mu.Unlock()
 		case <-ss.stop:
 			return
 		}

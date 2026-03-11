@@ -2,7 +2,6 @@ package admin
 
 import (
 	"io"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,12 +10,8 @@ import (
 
 func newTestSessionStore(t *testing.T, ttl time.Duration) *SessionStore {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "sessions.db")
 	lg := logging.New(logging.NewConsoleBackend(io.Discard, "human"))
-	ss, err := NewSessionStore(dbPath, ttl, lg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ss := NewSessionStore(ttl, lg)
 	t.Cleanup(func() { ss.Stop() })
 	return ss
 }

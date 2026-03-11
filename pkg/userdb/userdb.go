@@ -72,6 +72,9 @@ type DB struct {
 
 	downtimeMu    sync.RWMutex
 	downtimeCache map[string]DowntimeSchedule // username -> schedule
+
+	enabledMu    sync.RWMutex
+	enabledCache map[string]bool // username -> enabled
 }
 
 // Open opens (or creates) the SQLite user database at path.
@@ -98,9 +101,10 @@ func Open(path string, lg *logging.Logger) (*DB, error) {
 	udb := &DB{
 		db:            sqlDB,
 		logger:        lg,
-		cache:         make(map[string]cachedAuth),
-		dnsCache:      make(map[string]DNSEntry),
+		cache:        make(map[string]cachedAuth),
+		dnsCache:     make(map[string]DNSEntry),
 		downtimeCache: make(map[string]DowntimeSchedule),
+		enabledCache: make(map[string]bool),
 	}
 
 	if err := udb.migrate(); err != nil {
@@ -116,6 +120,11 @@ func Open(path string, lg *logging.Logger) (*DB, error) {
 	if err := udb.loadDowntimeCache(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("loading downtime cache: %w", err)
+	}
+
+	if err := udb.loadEnabledCache(); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("loading enabled cache: %w", err)
 	}
 
 	return udb, nil
@@ -265,6 +274,27 @@ func (d *DB) loadDowntimeCache() error {
 	return rows.Err()
 }
 
+func (d *DB) loadEnabledCache() error {
+	rows, err := d.db.Query("SELECT username, enabled FROM users")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	d.enabledMu.Lock()
+	defer d.enabledMu.Unlock()
+
+	for rows.Next() {
+		var username string
+		var enabled int
+		if err := rows.Scan(&username, &enabled); err != nil {
+			return err
+		}
+		d.enabledCache[username] = enabled != 0
+	}
+	return rows.Err()
+}
+
 // GetDowntime returns the per-user downtime schedule from the in-memory cache.
 func (d *DB) GetDowntime(username string) DowntimeSchedule {
 	d.downtimeMu.RLock()
@@ -339,6 +369,11 @@ func (d *DB) Add(username, password string, portMin, portMax int) (int, error) {
 		}
 		return 0, fmt.Errorf("inserting user: %w", err)
 	}
+
+	d.enabledMu.Lock()
+	d.enabledCache[username] = true // new users default to enabled
+	d.enabledMu.Unlock()
+
 	return port, nil
 }
 
@@ -384,17 +419,23 @@ func (d *DB) SetEnabled(username string, enabled bool) error {
 	if n == 0 {
 		return fmt.Errorf("%w: %q", ErrUnknownUser, username)
 	}
+
+	d.enabledMu.Lock()
+	d.enabledCache[username] = enabled
+	d.enabledMu.Unlock()
+
 	return nil
 }
 
 // IsEnabled returns whether a user is enabled. Returns false for unknown users.
 func (d *DB) IsEnabled(username string) bool {
-	var enabled int
-	err := d.db.QueryRow("SELECT enabled FROM users WHERE username = ?", username).Scan(&enabled)
-	if err != nil {
+	d.enabledMu.RLock()
+	enabled, ok := d.enabledCache[username]
+	d.enabledMu.RUnlock()
+	if !ok {
 		return false
 	}
-	return enabled != 0
+	return enabled
 }
 
 // Delete removes a user and invalidates their auth cache.
@@ -419,6 +460,10 @@ func (d *DB) Delete(username string) error {
 	d.downtimeMu.Lock()
 	delete(d.downtimeCache, username)
 	d.downtimeMu.Unlock()
+
+	d.enabledMu.Lock()
+	delete(d.enabledCache, username)
+	d.enabledMu.Unlock()
 
 	return nil
 }
