@@ -514,7 +514,7 @@ button:hover {
 .schedule-editor {
   flex-direction: column;
   align-items: stretch;
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--fg-dim);
   padding-left: 0.75rem;
   margin: 0.25rem 0;
 }
