@@ -546,19 +546,6 @@ button:hover {
   gap: 0.25rem;
   font-size: 0.8rem;
 }
-.schedule-window input[type="time"] {
-  font-family: inherit;
-  font-size: 0.75rem;
-  border: 1px solid var(--btn-border);
-  background: var(--bg-input);
-  color: var(--fg);
-  padding: 0.15rem 0.3rem;
-  border-radius: 2px;
-  width: 7.5rem;
-  flex: none;
-  max-width: none;
-}
-.schedule-window input[type="time"]:focus { border-color: var(--accent); outline: none; }
 .schedule-actions {
   display: flex;
   align-items: center;
@@ -566,6 +553,64 @@ button:hover {
   margin-top: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--border-subtle);
+}
+
+/* Time picker */
+.tp-time-btn {
+  font-family: inherit;
+  font-size: 0.75rem;
+  border: 1px solid var(--btn-border);
+  background: var(--bg-input);
+  color: var(--fg);
+  padding: 0.15rem 0.4rem;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tp-time-btn:hover { border-color: var(--accent); }
+.tp-time-active { border-color: var(--accent); background: var(--btn-bg-hover); }
+
+.time-picker {
+  padding: 0.4rem 0 0.4rem 3em;
+}
+.time-picker-inner {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.time-picker-hours {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 3px;
+}
+.time-picker-minutes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tp-btn {
+  font-family: inherit;
+  font-size: 0.65rem;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--fg-muted);
+  padding: 0.3rem 0.2rem;
+  cursor: pointer;
+  border-radius: 2px;
+  text-align: center;
+  min-width: 3.2rem;
+  white-space: nowrap;
+}
+.tp-btn:hover { background: var(--btn-bg-hover); border-color: var(--accent); }
+.tp-btn.tp-selected {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.tp-min {
+  min-width: 2.5rem;
+  font-size: 0.72rem;
+  padding: 0.35rem 0.4rem;
 }
 
 .btn-save { color: var(--accent); border-color: var(--accent); }

@@ -229,6 +229,7 @@ function toggleEdit(username, field) {
 function closeEdit() {
   if (editingField === 'dns' && editingUser) delete dnsEditProto[editingUser];
   if (editingField === 'schedule' && editingUser) delete scheduleEdit[editingUser];
+  activeTimePicker = null;
   editingUser = null;
   editingField = null;
   refreshUsers();
@@ -482,6 +483,7 @@ function checkDowntimeClient(schedule) {
 // --- Downtime Schedule ---
 var scheduleEdit = {}; // username -> working copy of schedule
 var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+var activeTimePicker = null; // {username, day, wi, field}
 
 function getScheduleEdit(username, fromUser) {
   if (!scheduleEdit.hasOwnProperty(username)) {
@@ -496,6 +498,91 @@ function getScheduleEdit(username, fromUser) {
     scheduleEdit[username] = sched;
   }
   return scheduleEdit[username];
+}
+
+function fmtTime12(h24) {
+  var h = h24 % 12 || 12;
+  var ampm = h24 < 12 ? 'AM' : 'PM';
+  return h + ampm;
+}
+
+function fmtTimeDisplay(val) {
+  if (!val) return '--:--';
+  var parts = val.split(':');
+  var h24 = parseInt(parts[0]);
+  var m = parseInt(parts[1]);
+  var h = h24 % 12 || 12;
+  var ampm = h24 < 12 ? 'AM' : 'PM';
+  return h + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+}
+
+function openTimePicker(username, day, wi, field) {
+  var ap = activeTimePicker;
+  if (ap && ap.username === username && ap.day === day && ap.wi === wi && ap.field === field) {
+    activeTimePicker = null;
+  } else {
+    activeTimePicker = {username: username, day: day, wi: wi, field: field};
+  }
+  renderUsersFromCache();
+}
+
+function pickHour(h24) {
+  if (!activeTimePicker) return;
+  var ap = activeTimePicker;
+  var sched = getScheduleEdit(ap.username);
+  var dk = String(ap.day);
+  if (sched[dk] && sched[dk][ap.wi]) {
+    var cur = sched[dk][ap.wi][ap.field] || '00:00';
+    var m = cur.split(':')[1] || '00';
+    sched[dk][ap.wi][ap.field] = String(h24).padStart(2, '0') + ':' + m;
+  }
+  renderUsersFromCache();
+}
+
+function pickMinute(m) {
+  if (!activeTimePicker) return;
+  var ap = activeTimePicker;
+  var sched = getScheduleEdit(ap.username);
+  var dk = String(ap.day);
+  if (sched[dk] && sched[dk][ap.wi]) {
+    var cur = sched[dk][ap.wi][ap.field] || '00:00';
+    var h = cur.split(':')[0] || '00';
+    sched[dk][ap.wi][ap.field] = h + ':' + String(m).padStart(2, '0');
+  }
+  renderUsersFromCache();
+}
+
+function renderTimePicker(username, day) {
+  var ap = activeTimePicker;
+  if (!ap || ap.username !== username || ap.day !== day) return '';
+
+  var sched = getScheduleEdit(username);
+  var dk = String(day);
+  var cur = (sched[dk] && sched[dk][ap.wi]) ? sched[dk][ap.wi][ap.field] : '00:00';
+  var curH = parseInt(cur.split(':')[0]);
+  var curM = parseInt(cur.split(':')[1]);
+
+  var html = '<div class="time-picker">';
+  html += '<div class="time-picker-inner">';
+
+  // Hour grid: 4 rows x 6 cols
+  html += '<div class="time-picker-hours">';
+  for (var h = 0; h < 24; h++) {
+    var sel = h === curH ? ' tp-selected' : '';
+    html += '<button class="tp-btn' + sel + '" onclick="pickHour(' + h + ')">' + fmtTime12(h) + '</button>';
+  }
+  html += '</div>';
+
+  // Minute column
+  html += '<div class="time-picker-minutes">';
+  [0, 15, 30, 45].forEach(function(m) {
+    var sel = m === curM ? ' tp-selected' : '';
+    html += '<button class="tp-btn tp-min' + sel + '" onclick="pickMinute(' + m + ')">:' + String(m).padStart(2, '0') + '</button>';
+  });
+  html += '</div>';
+
+  html += '</div></div>';
+  return html;
 }
 
 function renderScheduleEditRow(u) {
@@ -519,12 +606,18 @@ function renderScheduleEditRow(u) {
         var sMin = parseInt(w.start.split(':')[0]) * 60 + parseInt(w.start.split(':')[1]);
         var eMin = parseInt(w.end.split(':')[0]) * 60 + parseInt(w.end.split(':')[1]);
         var overnight = sMin > eMin ? ' <span class="dim">(overnight)</span>' : '';
+        var startActive = activeTimePicker && activeTimePicker.username === u.username &&
+          activeTimePicker.day === d && activeTimePicker.wi === wi && activeTimePicker.field === 'start';
+        var endActive = activeTimePicker && activeTimePicker.username === u.username &&
+          activeTimePicker.day === d && activeTimePicker.wi === wi && activeTimePicker.field === 'end';
         html += '<span class="schedule-window">' +
-          '<input type="time" class="inline-input inline-input-short" value="' + escAttr(w.start) + '"' +
-            ' onchange="updateScheduleTime(\'' + esc + '\',' + d + ',' + wi + ',\'start\',this.value)">' +
+          '<button class="tp-time-btn' + (startActive ? ' tp-time-active' : '') + '"' +
+            ' onclick="openTimePicker(\'' + esc + '\',' + d + ',' + wi + ',\'start\')">' +
+            fmtTimeDisplay(w.start) + '</button>' +
           ' \u2013 ' +
-          '<input type="time" class="inline-input inline-input-short" value="' + escAttr(w.end) + '"' +
-            ' onchange="updateScheduleTime(\'' + esc + '\',' + d + ',' + wi + ',\'end\',this.value)">' +
+          '<button class="tp-time-btn' + (endActive ? ' tp-time-active' : '') + '"' +
+            ' onclick="openTimePicker(\'' + esc + '\',' + d + ',' + wi + ',\'end\')">' +
+            fmtTimeDisplay(w.end) + '</button>' +
           overnight +
           ' <button class="btn-sm btn-danger" onclick="removeScheduleWindow(\'' + esc + '\',' + d + ',' + wi + ')">\u00d7</button>' +
           '</span>';
@@ -533,6 +626,9 @@ function renderScheduleEditRow(u) {
     html += '</span>' +
       '<button class="btn-sm" onclick="addScheduleWindow(\'' + esc + '\',' + d + ')">+ add downtime</button>' +
       '</div>';
+
+    // Render time picker below this day if active
+    html += renderTimePicker(u.username, d);
   }
 
   html += '</div>' +
@@ -548,6 +644,7 @@ function renderScheduleEditRow(u) {
 }
 
 function addScheduleWindow(username, day) {
+  activeTimePicker = null;
   var sched = getScheduleEdit(username);
   var dk = String(day);
   if (!sched[dk]) sched[dk] = [];
@@ -556,6 +653,7 @@ function addScheduleWindow(username, day) {
 }
 
 function removeScheduleWindow(username, day, idx) {
+  activeTimePicker = null;
   var sched = getScheduleEdit(username);
   var dk = String(day);
   if (sched[dk]) {
@@ -563,14 +661,6 @@ function removeScheduleWindow(username, day, idx) {
     if (sched[dk].length === 0) delete sched[dk];
   }
   renderUsersFromCache();
-}
-
-function updateScheduleTime(username, day, idx, field, value) {
-  var sched = getScheduleEdit(username);
-  var dk = String(day);
-  if (sched[dk] && sched[dk][idx]) {
-    sched[dk][idx][field] = value;
-  }
 }
 
 function copySundayToAll(username) {
