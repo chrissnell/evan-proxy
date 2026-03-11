@@ -90,8 +90,6 @@ timezone: "America/Denver"   # IANA timezone, e.g. America/Los_Angeles, US/Easte
 
 Without this, the container defaults to UTC and downtime windows won't match your local time.
 
-A background reconciler (30-second interval) also stops and starts per-user port listeners based on downtime status, so dedicated port connections are blocked during downtime windows as well.
-
 ## Building
 
 ```bash
