@@ -503,7 +503,7 @@ function getScheduleEdit(username, fromUser) {
 function fmtTime12(h24) {
   var h = h24 % 12 || 12;
   var ampm = h24 < 12 ? 'AM' : 'PM';
-  return h + ampm;
+  return h + ' ' + ampm;
 }
 
 function fmtTimeDisplay(val) {

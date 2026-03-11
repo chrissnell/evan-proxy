@@ -576,16 +576,17 @@ button:hover {
 .time-picker-inner {
   display: flex;
   gap: 0.5rem;
-  align-items: flex-start;
+  align-items: stretch;
 }
 .time-picker-hours {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
+  grid-template-rows: repeat(4, 1fr);
   gap: 3px;
 }
 .time-picker-minutes {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: repeat(4, 1fr);
   gap: 3px;
 }
 .tp-btn {
@@ -610,7 +611,9 @@ button:hover {
 .tp-min {
   min-width: 2.5rem;
   font-size: 0.72rem;
-  padding: 0.35rem 0.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-save { color: var(--accent); border-color: var(--accent); }
