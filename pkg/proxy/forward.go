@@ -85,6 +85,18 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 	// Cache successful auth for this IP+user
 	h.recordAuthSuccess(clientIP, user)
 
+	// Downtime check — user is authenticated but blocked during scheduled downtime
+	if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(user) {
+		w.Header().Set("Content-Length", "0")
+		w.WriteHeader(http.StatusForbidden)
+		h.logger.Log(logging.Entry{
+			Timestamp: start, ClientIP: clientIP, Method: r.Method,
+			Host: host, URI: r.RequestURI, User: user, Status: 403,
+			Error: "downtime", DurationMS: time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
 	// Attach per-user DNS resolver to context
 	ctx := h.ctxWithUserDNS(r.Context(), user)
 

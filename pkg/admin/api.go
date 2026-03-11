@@ -463,6 +463,47 @@ func (a *api) handleTestDNS(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(dnsTestResponse{OK: true, Addresses: ips})
 }
 
+type downtimeRequest struct {
+	Username         string                 `json:"username"`
+	DowntimeSchedule userdb.DowntimeSchedule `json:"downtime_schedule"`
+}
+
+func (a *api) handleUpdateDowntime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req downtimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.Username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate schedule (nil/empty clears downtime)
+	if len(req.DowntimeSchedule) > 0 {
+		if err := userdb.ValidateSchedule(req.DowntimeSchedule); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := a.users.UpdateDowntime(req.Username, req.DowntimeSchedule); err != nil {
+		if errors.Is(err, userdb.ErrUnknownUser) {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		a.logger.Errorf("admin", "update downtime: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (a *api) handleLogs(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

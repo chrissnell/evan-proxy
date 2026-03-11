@@ -503,6 +503,56 @@ button:hover {
 }
 .inline-input[type="number"] { -moz-appearance: textfield; }
 
+/* Schedule editor */
+.schedule-editor { flex-direction: column; align-items: stretch; }
+.schedule-title { font-size: 0.8rem; font-weight: 700; margin-bottom: 0.5rem; }
+.schedule-grid { display: flex; flex-direction: column; gap: 0.3rem; }
+.schedule-day {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.schedule-day-label {
+  font-weight: 700;
+  min-width: 2.5em;
+  font-size: 0.8rem;
+}
+.schedule-day-windows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  flex: 1;
+}
+.schedule-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+}
+.schedule-window input[type="time"] {
+  font-family: inherit;
+  font-size: 0.75rem;
+  border: 1px solid var(--btn-border);
+  background: var(--bg-input);
+  color: var(--fg);
+  padding: 0.15rem 0.3rem;
+  border-radius: 2px;
+  width: 5.5rem;
+  flex: none;
+  max-width: none;
+}
+.schedule-window input[type="time"]:focus { border-color: var(--accent); outline: none; }
+.schedule-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
 .btn-save { color: var(--accent); border-color: var(--accent); }
 .btn-save:hover { background: var(--accent); color: var(--bg); }
 

@@ -176,13 +176,15 @@ function renderUsers(users) {
       '<td>' + dnsLabel + '</td>' +
       '<td class="user-status">' + statusBtn + '</td>' +
       '<td class="user-actions">' +
+        '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'schedule\')">schedule</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'port\')">port</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'dns\')">dns</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'password\')">password</button>' +
         delBtn +
       '</td></tr>');
     if (editingUser === u.username) {
-      if (editingField === 'port') rows.push(renderPortEditRow(u));
+      if (editingField === 'schedule') rows.push(renderScheduleEditRow(u));
+      else if (editingField === 'port') rows.push(renderPortEditRow(u));
       else if (editingField === 'dns') rows.push(renderDNSEditRow(u));
       else if (editingField === 'password') rows.push(renderPasswordEditRow(u));
     }
@@ -217,6 +219,7 @@ function toggleEdit(username, field) {
 
 function closeEdit() {
   if (editingField === 'dns' && editingUser) delete dnsEditProto[editingUser];
+  if (editingField === 'schedule' && editingUser) delete scheduleEdit[editingUser];
   editingUser = null;
   editingField = null;
   refreshUsers();
@@ -431,6 +434,143 @@ async function saveDNS(username) {
   if (resp.status === 401) { window.location.href = '/login'; return; }
   if (!resp.ok) { showUsersError('failed to update DNS config'); return; }
   delete dnsEditProto[username];
+  editingUser = null;
+  editingField = null;
+  refreshUsers();
+}
+
+// --- Downtime Schedule ---
+var scheduleEdit = {}; // username -> working copy of schedule
+var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function getScheduleEdit(username, fromUser) {
+  if (!scheduleEdit.hasOwnProperty(username)) {
+    var sched = {};
+    if (fromUser && fromUser.downtime_schedule) {
+      for (var k in fromUser.downtime_schedule) {
+        sched[k] = fromUser.downtime_schedule[k].map(function(w) {
+          return {start: w.start, end: w.end};
+        });
+      }
+    }
+    scheduleEdit[username] = sched;
+  }
+  return scheduleEdit[username];
+}
+
+function renderScheduleEditRow(u) {
+  var esc = escAttr(u.username);
+  var sched = getScheduleEdit(u.username, u);
+  var html = '<tr class="inline-edit-row">' +
+    '<td colspan="6" class="inline-edit-cell">' +
+      '<div class="inline-edit-form schedule-editor">' +
+        '<div class="schedule-title">downtime schedule: ' + escHtml(u.username) + '</div>' +
+        '<div class="schedule-grid">';
+
+  for (var d = 0; d < 7; d++) {
+    var dk = String(d);
+    var windows = sched[dk] || [];
+    html += '<div class="schedule-day">' +
+      '<span class="schedule-day-label">' + dayNames[d] + '</span>' +
+      '<span class="schedule-day-windows">';
+    if (windows.length === 0) {
+      html += '<span class="dim">no windows</span>';
+    } else {
+      windows.forEach(function(w, wi) {
+        var overnight = w.start > w.end || (w.start === w.end) ? ' <span class="dim">(overnight)</span>' : '';
+        // Check if it's actually overnight by comparing parsed minutes
+        var sMin = parseInt(w.start.split(':')[0]) * 60 + parseInt(w.start.split(':')[1]);
+        var eMin = parseInt(w.end.split(':')[0]) * 60 + parseInt(w.end.split(':')[1]);
+        overnight = sMin >= eMin && sMin !== eMin ? ' <span class="dim">(overnight)</span>' : '';
+        html += '<span class="schedule-window">' +
+          '<input type="time" class="inline-input inline-input-short" value="' + escAttr(w.start) + '"' +
+            ' onchange="updateScheduleTime(\'' + esc + '\',' + d + ',' + wi + ',\'start\',this.value)">' +
+          ' \u2013 ' +
+          '<input type="time" class="inline-input inline-input-short" value="' + escAttr(w.end) + '"' +
+            ' onchange="updateScheduleTime(\'' + esc + '\',' + d + ',' + wi + ',\'end\',this.value)">' +
+          overnight +
+          ' <button class="btn-sm btn-danger" onclick="removeScheduleWindow(\'' + esc + '\',' + d + ',' + wi + ')">\u00d7</button>' +
+          '</span>';
+      });
+    }
+    html += '</span>' +
+      '<button class="btn-sm" onclick="addScheduleWindow(\'' + esc + '\',' + d + ')">+ add</button>' +
+      '</div>';
+  }
+
+  html += '</div>' +
+    '<div class="schedule-actions">' +
+      '<button class="btn-sm" onclick="copyWeekdaysToWeekend(\'' + esc + '\')">copy Mon \u2192 Sat+Sun</button>' +
+      '<span class="edit-actions">' +
+        '<button class="btn-sm btn-save" onclick="saveSchedule(\'' + esc + '\')">save</button>' +
+        '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+      '</span>' +
+    '</div>' +
+  '</div></td></tr>';
+  return html;
+}
+
+function addScheduleWindow(username, day) {
+  var sched = getScheduleEdit(username);
+  var dk = String(day);
+  if (!sched[dk]) sched[dk] = [];
+  sched[dk].push({start: '22:00', end: '06:00'});
+  renderUsersFromCache();
+}
+
+function removeScheduleWindow(username, day, idx) {
+  var sched = getScheduleEdit(username);
+  var dk = String(day);
+  if (sched[dk]) {
+    sched[dk].splice(idx, 1);
+    if (sched[dk].length === 0) delete sched[dk];
+  }
+  renderUsersFromCache();
+}
+
+function updateScheduleTime(username, day, idx, field, value) {
+  var sched = getScheduleEdit(username);
+  var dk = String(day);
+  if (sched[dk] && sched[dk][idx]) {
+    sched[dk][idx][field] = value;
+  }
+}
+
+function copyWeekdaysToWeekend(username) {
+  var sched = getScheduleEdit(username);
+  var monWindows = sched['1'] || [];
+  if (monWindows.length > 0) {
+    sched['0'] = monWindows.map(function(w) { return {start: w.start, end: w.end}; });
+    sched['6'] = monWindows.map(function(w) { return {start: w.start, end: w.end}; });
+  } else {
+    delete sched['0'];
+    delete sched['6'];
+  }
+  renderUsersFromCache();
+}
+
+async function saveSchedule(username) {
+  showUsersError('');
+  var sched = getScheduleEdit(username);
+
+  // Clean empty days
+  var cleaned = {};
+  for (var k in sched) {
+    if (sched[k] && sched[k].length > 0) cleaned[k] = sched[k];
+  }
+
+  var resp = await fetch('/api/users/downtime', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, downtime_schedule: cleaned})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) {
+    var text = await resp.text();
+    showUsersError(text || 'failed to update schedule');
+    return;
+  }
+  delete scheduleEdit[username];
   editingUser = null;
   editingField = null;
   refreshUsers();

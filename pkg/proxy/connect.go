@@ -122,6 +122,17 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Cache successful auth for this IP
 	h.recordAuthSuccess(clientIP, user)
 
+	// Downtime check — user is authenticated but blocked during scheduled downtime
+	if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(user) {
+		conn.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
+		h.logger.Log(logging.Entry{
+			Timestamp: start, ClientIP: clientIP, Method: "CONNECT",
+			Host: host, User: user, Status: 403, Error: "downtime",
+			DurationMS: time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
 	h.connectTunnel(conn, bufrw, r.Context(), start, clientIP, host, user)
 }
 

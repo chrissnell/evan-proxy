@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -46,12 +47,13 @@ type cachedAuth struct {
 }
 
 type UserInfo struct {
-	Username    string `json:"username"`
-	CreatedAt   string `json:"created_at"`
-	DNSServer   string `json:"dns_server"`
-	DNSProtocol string `json:"dns_protocol"`
-	Port        int    `json:"port"`
-	Enabled     bool   `json:"enabled"`
+	Username         string           `json:"username"`
+	CreatedAt        string           `json:"created_at"`
+	DNSServer        string           `json:"dns_server"`
+	DNSProtocol      string           `json:"dns_protocol"`
+	Port             int              `json:"port"`
+	Enabled          bool             `json:"enabled"`
+	DowntimeSchedule DowntimeSchedule `json:"downtime_schedule,omitempty"`
 }
 
 type DNSEntry struct {
@@ -67,6 +69,9 @@ type DB struct {
 
 	dnsMu    sync.RWMutex
 	dnsCache map[string]DNSEntry // username -> dns config
+
+	downtimeMu    sync.RWMutex
+	downtimeCache map[string]DowntimeSchedule // username -> schedule
 }
 
 // Open opens (or creates) the SQLite user database at path.
@@ -91,10 +96,11 @@ func Open(path string, lg *logging.Logger) (*DB, error) {
 	}
 
 	udb := &DB{
-		db:       sqlDB,
-		logger:   lg,
-		cache:    make(map[string]cachedAuth),
-		dnsCache: make(map[string]DNSEntry),
+		db:            sqlDB,
+		logger:        lg,
+		cache:         make(map[string]cachedAuth),
+		dnsCache:      make(map[string]DNSEntry),
+		downtimeCache: make(map[string]DowntimeSchedule),
 	}
 
 	if err := udb.migrate(); err != nil {
@@ -105,6 +111,11 @@ func Open(path string, lg *logging.Logger) (*DB, error) {
 	if err := udb.loadDNSCache(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("loading DNS cache: %w", err)
+	}
+
+	if err := udb.loadDowntimeCache(); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("loading downtime cache: %w", err)
 	}
 
 	return udb, nil
@@ -161,6 +172,12 @@ func (d *DB) migrate() error {
 			return fmt.Errorf("adding enabled column: %w", err)
 		}
 		d.logger.Infof("userdb", "migrated — added enabled column")
+	}
+	if !cols["downtime_schedule"] {
+		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN downtime_schedule TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("adding downtime_schedule column: %w", err)
+		}
+		d.logger.Infof("userdb", "migrated — added downtime_schedule column")
 	}
 	return nil
 }
@@ -220,6 +237,80 @@ func (d *DB) UpdateDNS(username, server, protocol string) error {
 	d.dnsMu.Unlock()
 
 	return nil
+}
+
+// loadDowntimeCache populates the in-memory downtime schedule cache from the database.
+func (d *DB) loadDowntimeCache() error {
+	rows, err := d.db.Query("SELECT username, downtime_schedule FROM users WHERE downtime_schedule != ''")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	d.downtimeMu.Lock()
+	defer d.downtimeMu.Unlock()
+
+	for rows.Next() {
+		var username, raw string
+		if err := rows.Scan(&username, &raw); err != nil {
+			return err
+		}
+		var sched DowntimeSchedule
+		if err := json.Unmarshal([]byte(raw), &sched); err != nil {
+			d.logger.Errorf("userdb", "invalid downtime schedule for %q: %v", username, err)
+			continue
+		}
+		d.downtimeCache[username] = sched
+	}
+	return rows.Err()
+}
+
+// GetDowntime returns the per-user downtime schedule from the in-memory cache.
+func (d *DB) GetDowntime(username string) DowntimeSchedule {
+	d.downtimeMu.RLock()
+	sched := d.downtimeCache[username]
+	d.downtimeMu.RUnlock()
+	return sched
+}
+
+// UpdateDowntime sets a user's downtime schedule. Pass nil/empty to clear.
+func (d *DB) UpdateDowntime(username string, schedule DowntimeSchedule) error {
+	var raw string
+	if len(schedule) > 0 {
+		b, err := json.Marshal(schedule)
+		if err != nil {
+			return fmt.Errorf("marshaling schedule: %w", err)
+		}
+		raw = string(b)
+	}
+
+	res, err := d.db.Exec("UPDATE users SET downtime_schedule = ? WHERE username = ?", raw, username)
+	if err != nil {
+		return fmt.Errorf("updating downtime schedule: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("%w: %q", ErrUnknownUser, username)
+	}
+
+	d.downtimeMu.Lock()
+	if len(schedule) == 0 {
+		delete(d.downtimeCache, username)
+	} else {
+		d.downtimeCache[username] = schedule
+	}
+	d.downtimeMu.Unlock()
+
+	return nil
+}
+
+// IsInDowntime returns whether a user is currently in a downtime window.
+func (d *DB) IsInDowntime(username string) bool {
+	sched := d.GetDowntime(username)
+	if len(sched) == 0 {
+		return false
+	}
+	return isInDowntime(sched, time.Now())
 }
 
 // ErrNoPortAvailable is returned when all ports in the range are assigned.
@@ -325,6 +416,10 @@ func (d *DB) Delete(username string) error {
 	delete(d.dnsCache, username)
 	d.dnsMu.Unlock()
 
+	d.downtimeMu.Lock()
+	delete(d.downtimeCache, username)
+	d.downtimeMu.Unlock()
+
 	return nil
 }
 
@@ -357,7 +452,7 @@ func (d *DB) ChangePassword(username, newPassword string) error {
 
 // List returns all usernames and their creation times.
 func (d *DB) List() ([]UserInfo, error) {
-	rows, err := d.db.Query("SELECT username, created_at, dns_server, dns_protocol, port, enabled FROM users ORDER BY username")
+	rows, err := d.db.Query("SELECT username, created_at, dns_server, dns_protocol, port, enabled, downtime_schedule FROM users ORDER BY username")
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)
 	}
@@ -367,10 +462,14 @@ func (d *DB) List() ([]UserInfo, error) {
 	for rows.Next() {
 		var u UserInfo
 		var enabled int
-		if err := rows.Scan(&u.Username, &u.CreatedAt, &u.DNSServer, &u.DNSProtocol, &u.Port, &enabled); err != nil {
+		var rawDowntime string
+		if err := rows.Scan(&u.Username, &u.CreatedAt, &u.DNSServer, &u.DNSProtocol, &u.Port, &enabled, &rawDowntime); err != nil {
 			return nil, fmt.Errorf("scanning user: %w", err)
 		}
 		u.Enabled = enabled != 0
+		if rawDowntime != "" {
+			json.Unmarshal([]byte(rawDowntime), &u.DowntimeSchedule)
+		}
 		users = append(users, u)
 	}
 	return users, rows.Err()

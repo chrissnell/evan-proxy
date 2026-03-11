@@ -35,6 +35,11 @@ type PortLister interface {
 	PortOwner(port int) (string, error)
 }
 
+// DowntimeChecker returns whether a user is currently in a downtime window.
+type DowntimeChecker interface {
+	IsInDowntime(username string) bool
+}
+
 // DNSObserver receives DNS lookup metrics.
 type DNSObserver interface {
 	ObserveDNS(d time.Duration, result string)
@@ -82,6 +87,7 @@ type Handler struct {
 	dnsGetter       UserDNSGetter
 	portDB          PortLister
 	enabledChecker  UserEnabledChecker
+	downtimeChecker DowntimeChecker
 	acl             acl.ACL
 	limiter         *ratelimit.Limiter
 	logger          *logging.Logger
@@ -117,7 +123,7 @@ func isDNSBlocked(ip net.IP) bool {
 	return ip.IsLoopback() || ip.Equal(net.IPv4zero) || loopbackNet.Contains(ip)
 }
 
-func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB PortLister, enabled UserEnabledChecker, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, dnsObs DNSObserver) *Handler {
+func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB PortLister, enabled UserEnabledChecker, downtime DowntimeChecker, a acl.ACL, rl *ratelimit.Limiter, lg *logging.Logger, tc *stats.TrafficCounter, dnsObs DNSObserver) *Handler {
 	defaultResolver, err := edns.New(cfg.DNSProtocol, cfg.DNSServer)
 	if err != nil {
 		panic(fmt.Sprintf("dns resolver: %v", err))
@@ -135,6 +141,7 @@ func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB 
 		dnsGetter:       dnsGetter,
 		portDB:          portDB,
 		enabledChecker:  enabled,
+		downtimeChecker: downtime,
 		acl:             a,
 		limiter:         rl,
 		logger:          lg,
