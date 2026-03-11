@@ -79,6 +79,7 @@ func main() {
 	if err := proxyHandler.StartUserListeners(); err != nil {
 		logger.Fatalf("proxy", "user listeners: %v", err)
 	}
+	proxyHandler.StartReconciler(30 * time.Second)
 
 	// Admin listener (no WriteTimeout -- SSE log streaming needs long-lived responses)
 	adminSrv := &http.Server{
@@ -104,6 +105,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	proxyHandler.StopReconciler()
 	proxyHandler.ShutdownUserListeners(ctx)
 	proxyHandler.StopAuthCleanup()
 	adminSrv.Shutdown(ctx)

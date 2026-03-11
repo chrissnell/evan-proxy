@@ -109,6 +109,9 @@ type Handler struct {
 	portMu      sync.RWMutex
 	portUsers   map[int]string       // port → username
 	userServers map[int]*http.Server // port → running server
+
+	// Downtime reconciler
+	reconcileStop chan struct{}
 }
 
 // loopbackNet covers 127.0.0.0/8 used by DNS-blocking resolvers.

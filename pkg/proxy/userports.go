@@ -13,7 +13,7 @@ type UserEnabledChecker interface {
 }
 
 // StartUserListeners loads port assignments from the DB and starts a
-// dedicated HTTP listener for each enabled user.
+// dedicated HTTP listener for each enabled, non-downtime user.
 func (h *Handler) StartUserListeners() error {
 	ports, err := h.portDB.ListPorts()
 	if err != nil {
@@ -32,10 +32,103 @@ func (h *Handler) StartUserListeners() error {
 			h.logger.Infof("userports", "skipping disabled user %q (port %d)", username, port)
 			continue
 		}
+		if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(username) {
+			h.logger.Infof("userports", "skipping downtime user %q (port %d)", username, port)
+			continue
+		}
 		h.portUsers[port] = username
 		h.startListenerLocked(port, username)
 	}
 	return nil
+}
+
+// StartReconciler starts a background goroutine that periodically checks
+// downtime and enabled status, stopping/starting dedicated port listeners
+// as needed. This ensures listeners are stopped during downtime windows
+// and restarted when they end.
+func (h *Handler) StartReconciler(interval time.Duration) {
+	h.reconcileStop = make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				h.reconcileListeners()
+			case <-h.reconcileStop:
+				return
+			}
+		}
+	}()
+}
+
+// StopReconciler stops the background reconciler goroutine.
+func (h *Handler) StopReconciler() {
+	if h.reconcileStop != nil {
+		close(h.reconcileStop)
+	}
+}
+
+// reconcileListeners ensures dedicated port listeners match current
+// enabled + downtime status. Stops listeners for disabled/downtime users
+// and starts them for users who should be active.
+func (h *Handler) reconcileListeners() {
+	ports, err := h.portDB.ListPorts()
+	if err != nil {
+		h.logger.Errorf("userports", "reconcile: %v", err)
+		return
+	}
+
+	// Determine which ports should have running listeners
+	shouldRun := make(map[int]string)
+	for port, username := range ports {
+		if port < h.cfg.UserPortMin || port > h.cfg.UserPortMax {
+			continue
+		}
+		if !h.enabledChecker.IsEnabled(username) {
+			continue
+		}
+		if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(username) {
+			continue
+		}
+		shouldRun[port] = username
+	}
+
+	h.portMu.Lock()
+
+	// Collect listeners to stop (running but shouldn't be)
+	var toStop []struct {
+		port int
+		srv  *http.Server
+	}
+	for port, srv := range h.userServers {
+		if _, ok := shouldRun[port]; !ok {
+			toStop = append(toStop, struct {
+				port int
+				srv  *http.Server
+			}{port, srv})
+			delete(h.userServers, port)
+			delete(h.portUsers, port)
+		}
+	}
+
+	// Start listeners that should be running but aren't
+	for port, username := range shouldRun {
+		if _, running := h.userServers[port]; !running {
+			h.portUsers[port] = username
+			h.startListenerLocked(port, username)
+		}
+	}
+
+	h.portMu.Unlock()
+
+	// Shut down stopped listeners outside the lock
+	for _, s := range toStop {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.srv.Shutdown(ctx)
+		cancel()
+		h.logger.Infof("userports", "reconcile: stopped listener on :%d", s.port)
+	}
 }
 
 // startListenerLocked starts a listener for a single port. Caller must hold portMu.
