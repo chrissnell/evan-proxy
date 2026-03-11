@@ -1,0 +1,99 @@
+version: 2
+
+project_name: evan-proxy
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: evan-proxy
+    main: ./cmd/evan-proxy
+    binary: evan-proxy
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.Version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - openbsd
+      - freebsd
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: openbsd
+        goarch: arm64
+      - goos: freebsd
+        goarch: arm64
+
+archives:
+  - id: evan-proxy
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- if eq .Os "darwin" }}macOS{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE*
+      - README*
+
+dockers:
+  - image_templates:
+      - "ghcr.io/chrissnell/evan-proxy:{{ .Tag }}-amd64"
+    dockerfile: Dockerfile.goreleaser
+    use: docker
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+  - image_templates:
+      - "ghcr.io/chrissnell/evan-proxy:{{ .Tag }}-arm64"
+    dockerfile: Dockerfile.goreleaser
+    use: docker
+    goos: linux
+    goarch: arm64
+    build_flag_templates:
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+
+docker_manifests:
+  - name_template: "ghcr.io/chrissnell/evan-proxy:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/chrissnell/evan-proxy:{{ .Tag }}-amd64"
+      - "ghcr.io/chrissnell/evan-proxy:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/chrissnell/evan-proxy:latest"
+    image_templates:
+      - "ghcr.io/chrissnell/evan-proxy:{{ .Tag }}-amd64"
+      - "ghcr.io/chrissnell/evan-proxy:{{ .Tag }}-arm64"
+
+checksum:
+  name_template: 'checksums.txt'
+
+release:
+  draft: false
+  replace_existing_draft: true
+  replace_existing_artifacts: true
+  target_commitish: '{{ .Commit }}'
+  prerelease: auto
+  mode: replace
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
