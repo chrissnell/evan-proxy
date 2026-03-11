@@ -31,3 +31,6 @@ data:
   {{- end }}
   USER_PORT_MIN: {{ .Values.proxy.userPortMin | quote }}
   USER_PORT_MAX: {{ .Values.proxy.userPortMax | quote }}
+  {{- if .Values.timezone }}
+  TZ: {{ .Values.timezone | quote }}
+  {{- end }}

@@ -86,6 +86,10 @@ ingress:
           pathType: ImplementationSpecific
           servicePort: 9090
 
+# Timezone for downtime schedule evaluation (IANA format)
+# e.g. "America/Denver", "America/Los_Angeles", "US/Eastern"
+timezone: "America/Denver"
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
