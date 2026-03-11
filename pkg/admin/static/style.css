@@ -511,8 +511,13 @@ button:hover {
 .inline-input[type="number"] { -moz-appearance: textfield; }
 
 /* Schedule editor */
-.schedule-editor { flex-direction: column; align-items: stretch; }
-.schedule-title { font-size: 0.8rem; font-weight: 700; margin-bottom: 0.5rem; }
+.schedule-editor {
+  flex-direction: column;
+  align-items: stretch;
+  border-left: 3px solid var(--accent);
+  padding-left: 0.75rem;
+  margin: 0.25rem 0;
+}
 .schedule-grid { display: flex; flex-direction: column; gap: 0.3rem; }
 .schedule-day {
   display: flex;
