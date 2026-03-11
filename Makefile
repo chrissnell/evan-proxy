@@ -3,7 +3,7 @@ IMAGE    := ghcr.io/chrissnell/evan-proxy
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 PLATFORM ?= linux/amd64
 
-.PHONY: build test clean docker docker-push deploy helm bump-minor bump-patch
+.PHONY: build test clean docker docker-push deploy helm bump-minor bump-point
 
 # Get latest semver tag components
 LATEST_TAG := $(shell git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | head -1)
@@ -17,7 +17,7 @@ bump-minor:
 	git tag $(NEW_TAG)
 	git push origin main --tags
 
-bump-patch:
+bump-point:
 	$(eval NEW_TAG := v$(TAG_MAJOR).$(TAG_MINOR).$(shell echo $$(($(TAG_PATCH)+1))))
 	@echo "$(LATEST_TAG) -> $(NEW_TAG)"
 	git tag $(NEW_TAG)
