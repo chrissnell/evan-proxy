@@ -7,7 +7,7 @@ ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=${VERSION}" -o /evan-proxy ./cmd/evan-proxy
 
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache ca-certificates tzdata \
     && apk del --purge apk-tools \
     && rm -rf /var/cache/apk/* /sbin/apk /etc/apk /lib/apk /usr/share/apk \
     && addgroup -g 10001 -S proxy \
