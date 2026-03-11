@@ -36,6 +36,7 @@ To make this work, follow this plan:
 - Rate-limiting on authentication failures to prevent password brute-forcing
 - DNS-over-TLS (DoT) and DNS-over-HTTPS (DoH) support
 - DNS-level block detection (returns 523 for DNS-blocked domains)
+- Downtime schedules — set per-user internet access windows by day of week
 - Prometheus metrics endpoint (`/metrics`)
 
 ## Configuration
@@ -72,6 +73,24 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `AUTH_FAIL_RATE_LIMIT` | `5` | Failed auth attempts before rate limiting kicks in |
 | `AUTH_FAIL_WINDOW` | `60s` | Sliding window for rate limiting |
 | `LOG_FORMAT` | `human` | Log format: `json` or `human` |
+| `TZ` | | IANA timezone for downtime schedules (e.g. `America/Denver`) |
+
+## Downtime Schedules
+
+Each user can have a downtime schedule that blocks proxy access during specified hours on each day of the week. Schedules are configured through the admin UI using your local time (e.g. "no internet from 9:00 PM to 7:00 AM on school nights").
+
+Overnight windows that cross midnight are handled automatically — a window from 21:00 to 07:00 on Monday means access is blocked from Monday 9 PM through Tuesday 7 AM.
+
+**Timezone configuration is required.** The server evaluates downtime schedules against its local clock, so it must be set to your timezone. In Kubernetes, set the `TZ` environment variable (the Docker image includes `tzdata`). The Helm chart exposes this as the `timezone` value:
+
+```yaml
+# values.yaml
+timezone: "America/Denver"   # IANA timezone, e.g. America/Los_Angeles, US/Eastern
+```
+
+Without this, the container defaults to UTC and downtime windows won't match your local time.
+
+A background reconciler (30-second interval) also stops and starts per-user port listeners based on downtime status, so dedicated port connections are blocked during downtime windows as well.
 
 ## Building
 
@@ -133,6 +152,7 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `resources.requests.memory` | string | `"64Mi"` | Memory request |
 | `resources.limits.cpu` | string | `"1000m"` | CPU limit |
 | `resources.limits.memory` | string | `"512Mi"` | Memory limit |
+| `timezone` | string | `"America/Denver"` | IANA timezone for downtime schedule evaluation |
 | `networkPolicy.enabled` | bool | `true` | Enable Kubernetes NetworkPolicy |
 | `networkPolicy.allowAllEgress` | bool | `true` | Allow all egress for CONNECT tunnels |
 | `nodeSelector` | object | `{}` | Node selector |
