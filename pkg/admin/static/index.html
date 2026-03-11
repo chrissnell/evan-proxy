@@ -517,11 +517,9 @@ function renderScheduleEditRow(u) {
       html += '<span class="dim">no downtime</span>';
     } else {
       windows.forEach(function(w, wi) {
-        var overnight = w.start > w.end || (w.start === w.end) ? ' <span class="dim">(overnight)</span>' : '';
-        // Check if it's actually overnight by comparing parsed minutes
         var sMin = parseInt(w.start.split(':')[0]) * 60 + parseInt(w.start.split(':')[1]);
         var eMin = parseInt(w.end.split(':')[0]) * 60 + parseInt(w.end.split(':')[1]);
-        overnight = sMin >= eMin && sMin !== eMin ? ' <span class="dim">(overnight)</span>' : '';
+        var overnight = sMin > eMin ? ' <span class="dim">(overnight)</span>' : '';
         html += '<span class="schedule-window">' +
           '<input type="time" class="inline-input inline-input-short" value="' + escAttr(w.start) + '"' +
             ' onchange="updateScheduleTime(\'' + esc + '\',' + d + ',' + wi + ',\'start\',this.value)">' +

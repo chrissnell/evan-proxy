@@ -546,7 +546,7 @@ button:hover {
   color: var(--fg);
   padding: 0.15rem 0.3rem;
   border-radius: 2px;
-  width: 5.5rem;
+  width: 7.5rem;
   flex: none;
   max-width: none;
 }
