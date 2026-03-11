@@ -205,8 +205,10 @@ button:hover {
   margin-bottom: 1rem;
 }
 
+.status-label { font-size: 0.8rem; vertical-align: middle; }
 .status-enabled { color: var(--accent); }
 .status-disabled { color: var(--danger); }
+.status-downtime { color: var(--warn); }
 
 .dot {
   display: inline-block;
@@ -225,6 +227,11 @@ button:hover {
 .dot-disabled {
   background: var(--danger);
   box-shadow: 0 0 6px var(--danger);
+}
+
+.dot-downtime {
+  background: var(--warn);
+  box-shadow: 0 0 6px var(--warn);
 }
 
 .header {

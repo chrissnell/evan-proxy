@@ -166,16 +166,25 @@ function renderUsers(users) {
     var delBtn = deleteConfirm === u.username
       ? '<button class="btn-sm btn-danger-confirm" onclick="confirmDelete(\'' + esc + '\')">confirm?</button>'
       : '<button class="btn-sm btn-danger" onclick="startDelete(\'' + esc + '\')">delete</button>';
-    var statusBtn = u.enabled
-      ? '<span class="dot dot-enabled"></span><button class="btn-sm btn-enabled" onclick="toggleEnabled(\'' + esc + '\',' + u.enabled + ')">enabled</button>'
-      : '<span class="dot dot-disabled"></span><button class="btn-sm btn-disabled" onclick="toggleEnabled(\'' + esc + '\',' + u.enabled + ')">disabled</button>';
+    var statusIndicator;
+    if (!u.enabled) {
+      statusIndicator = '<span class="dot dot-disabled"></span><span class="status-label status-disabled">disabled</span>';
+    } else if (checkDowntimeClient(u.downtime_schedule)) {
+      statusIndicator = '<span class="dot dot-downtime"></span><span class="status-label status-downtime">downtime</span>';
+    } else {
+      statusIndicator = '<span class="dot dot-enabled"></span><span class="status-label status-enabled">enabled</span>';
+    }
+    var toggleBtn = u.enabled
+      ? '<button class="btn-sm btn-disabled" onclick="toggleEnabled(\'' + esc + '\',' + u.enabled + ')">disable</button>'
+      : '<button class="btn-sm btn-enabled" onclick="toggleEnabled(\'' + esc + '\',' + u.enabled + ')">enable</button>';
     rows.push('<tr>' +
       '<td>' + escHtml(u.username) + '</td>' +
       '<td class="dim">' + escHtml(created) + '</td>' +
       '<td>' + portLabel + '</td>' +
       '<td>' + dnsLabel + '</td>' +
-      '<td class="user-status">' + statusBtn + '</td>' +
+      '<td class="user-status">' + statusIndicator + '</td>' +
       '<td class="user-actions">' +
+        toggleBtn +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'schedule\')">schedule</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'port\')">port</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'dns\')">dns</button>' +
@@ -439,6 +448,37 @@ async function saveDNS(username) {
   refreshUsers();
 }
 
+// --- Downtime Check (client-side, mirrors server logic) ---
+function checkDowntimeClient(schedule) {
+  if (!schedule || typeof schedule !== 'object') return false;
+  var now = new Date();
+  var nowMin = now.getHours() * 60 + now.getMinutes();
+  var today = String(now.getDay());
+  var yesterday = String((now.getDay() + 6) % 7);
+
+  function parseMin(t) {
+    var p = t.split(':');
+    return parseInt(p[0]) * 60 + parseInt(p[1]);
+  }
+
+  // Check today's windows
+  var todayWindows = schedule[today] || [];
+  for (var i = 0; i < todayWindows.length; i++) {
+    var s = parseMin(todayWindows[i].start), e = parseMin(todayWindows[i].end);
+    if (s < e) { if (nowMin >= s && nowMin < e) return true; }
+    else { if (nowMin >= s) return true; }
+  }
+
+  // Check yesterday's overnight spillover
+  var yestWindows = schedule[yesterday] || [];
+  for (var j = 0; j < yestWindows.length; j++) {
+    var s2 = parseMin(yestWindows[j].start), e2 = parseMin(yestWindows[j].end);
+    if (s2 >= e2 && nowMin < e2) return true;
+  }
+
+  return false;
+}
+
 // --- Downtime Schedule ---
 var scheduleEdit = {}; // username -> working copy of schedule
 var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -474,7 +514,7 @@ function renderScheduleEditRow(u) {
       '<span class="schedule-day-label">' + dayNames[d] + '</span>' +
       '<span class="schedule-day-windows">';
     if (windows.length === 0) {
-      html += '<span class="dim">no windows</span>';
+      html += '<span class="dim">no downtime</span>';
     } else {
       windows.forEach(function(w, wi) {
         var overnight = w.start > w.end || (w.start === w.end) ? ' <span class="dim">(overnight)</span>' : '';
@@ -494,13 +534,13 @@ function renderScheduleEditRow(u) {
       });
     }
     html += '</span>' +
-      '<button class="btn-sm" onclick="addScheduleWindow(\'' + esc + '\',' + d + ')">+ add</button>' +
+      '<button class="btn-sm" onclick="addScheduleWindow(\'' + esc + '\',' + d + ')">+ add downtime</button>' +
       '</div>';
   }
 
   html += '</div>' +
     '<div class="schedule-actions">' +
-      '<button class="btn-sm" onclick="copyWeekdaysToWeekend(\'' + esc + '\')">copy Mon \u2192 Sat+Sun</button>' +
+      '<button class="btn-sm" onclick="copySundayToAll(\'' + esc + '\')">copy Sun \u2192 all days</button>' +
       '<span class="edit-actions">' +
         '<button class="btn-sm btn-save" onclick="saveSchedule(\'' + esc + '\')">save</button>' +
         '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
@@ -536,15 +576,16 @@ function updateScheduleTime(username, day, idx, field, value) {
   }
 }
 
-function copyWeekdaysToWeekend(username) {
+function copySundayToAll(username) {
   var sched = getScheduleEdit(username);
-  var monWindows = sched['1'] || [];
-  if (monWindows.length > 0) {
-    sched['0'] = monWindows.map(function(w) { return {start: w.start, end: w.end}; });
-    sched['6'] = monWindows.map(function(w) { return {start: w.start, end: w.end}; });
-  } else {
-    delete sched['0'];
-    delete sched['6'];
+  var sunWindows = sched['0'] || [];
+  for (var d = 1; d <= 6; d++) {
+    var dk = String(d);
+    if (sunWindows.length > 0) {
+      sched[dk] = sunWindows.map(function(w) { return {start: w.start, end: w.end}; });
+    } else {
+      delete sched[dk];
+    }
   }
   renderUsersFromCache();
 }
