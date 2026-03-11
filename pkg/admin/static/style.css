@@ -20,6 +20,7 @@
   --accent-glow: #2a7a5a;
   --danger: #c44;
   --warn: #a85;
+  --purple: #7a5aa0;
   --btn-bg: #f0f0f0;
   --btn-bg-hover: #e4e4e4;
   --btn-border: #ccc;
@@ -52,6 +53,7 @@
   --accent-glow: #5a9;
   --danger: #c66;
   --warn: #ca5;
+  --purple: #a080c8;
   --btn-bg: #1a1a1a;
   --btn-bg-hover: #252525;
   --btn-border: #333;
@@ -86,6 +88,7 @@
     --accent-glow: #5a9;
     --danger: #c66;
     --warn: #ca5;
+    --purple: #a080c8;
     --btn-bg: #1a1a1a;
     --btn-bg-hover: #252525;
     --btn-border: #333;
@@ -578,7 +581,7 @@ button:hover {
 .user-status .dot { margin-right: 0.25rem; }
 
 .btn-enabled { color: var(--accent); border-color: var(--accent); }
-.btn-disabled { color: var(--danger); border-color: var(--danger); }
+.btn-disabled { color: var(--purple); border-color: var(--purple); }
 
 .dns-test-ok { color: var(--accent); font-size: 0.85rem; }
 .dns-test-fail { color: var(--danger); font-size: 0.85rem; }
