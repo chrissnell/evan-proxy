@@ -47,13 +47,14 @@ type cachedAuth struct {
 }
 
 type UserInfo struct {
-	Username         string           `json:"username"`
-	CreatedAt        string           `json:"created_at"`
-	DNSServer        string           `json:"dns_server"`
-	DNSProtocol      string           `json:"dns_protocol"`
-	Port             int              `json:"port"`
-	Enabled          bool             `json:"enabled"`
-	DowntimeSchedule DowntimeSchedule `json:"downtime_schedule,omitempty"`
+	Username              string           `json:"username"`
+	CreatedAt             string           `json:"created_at"`
+	DNSServer             string           `json:"dns_server"`
+	DNSProtocol           string           `json:"dns_protocol"`
+	Port                  int              `json:"port"`
+	Enabled               bool             `json:"enabled"`
+	DowntimeSchedule      DowntimeSchedule `json:"downtime_schedule,omitempty"`
+	DowntimeOverrideUntil string           `json:"downtime_override_until,omitempty"`
 }
 
 type DNSEntry struct {
@@ -72,6 +73,9 @@ type DB struct {
 
 	downtimeMu    sync.RWMutex
 	downtimeCache map[string]DowntimeSchedule // username -> schedule
+
+	overrideMu    sync.RWMutex
+	overrideCache map[string]time.Time // username -> override expiry
 
 	enabledMu    sync.RWMutex
 	enabledCache map[string]bool // username -> enabled
@@ -101,10 +105,11 @@ func Open(path string, lg *logging.Logger) (*DB, error) {
 	udb := &DB{
 		db:            sqlDB,
 		logger:        lg,
-		cache:        make(map[string]cachedAuth),
-		dnsCache:     make(map[string]DNSEntry),
+		cache:         make(map[string]cachedAuth),
+		dnsCache:      make(map[string]DNSEntry),
 		downtimeCache: make(map[string]DowntimeSchedule),
-		enabledCache: make(map[string]bool),
+		overrideCache: make(map[string]time.Time),
+		enabledCache:  make(map[string]bool),
 	}
 
 	if err := udb.migrate(); err != nil {
@@ -120,6 +125,11 @@ func Open(path string, lg *logging.Logger) (*DB, error) {
 	if err := udb.loadDowntimeCache(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("loading downtime cache: %w", err)
+	}
+
+	if err := udb.loadOverrideCache(); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("loading override cache: %w", err)
 	}
 
 	if err := udb.loadEnabledCache(); err != nil {
@@ -187,6 +197,12 @@ func (d *DB) migrate() error {
 			return fmt.Errorf("adding downtime_schedule column: %w", err)
 		}
 		d.logger.Infof("userdb", "migrated — added downtime_schedule column")
+	}
+	if !cols["downtime_override_until"] {
+		if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN downtime_override_until TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("adding downtime_override_until column: %w", err)
+		}
+		d.logger.Infof("userdb", "migrated — added downtime_override_until column")
 	}
 	return nil
 }
@@ -274,6 +290,34 @@ func (d *DB) loadDowntimeCache() error {
 	return rows.Err()
 }
 
+// loadOverrideCache populates the in-memory downtime override cache from the database.
+func (d *DB) loadOverrideCache() error {
+	rows, err := d.db.Query("SELECT username, downtime_override_until FROM users WHERE downtime_override_until != ''")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	d.overrideMu.Lock()
+	defer d.overrideMu.Unlock()
+
+	for rows.Next() {
+		var username, raw string
+		if err := rows.Scan(&username, &raw); err != nil {
+			return err
+		}
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			d.logger.Errorf("userdb", "invalid override timestamp for %q: %v", username, err)
+			continue
+		}
+		if t.After(time.Now()) {
+			d.overrideCache[username] = t
+		}
+	}
+	return rows.Err()
+}
+
 func (d *DB) loadEnabledCache() error {
 	rows, err := d.db.Query("SELECT username, enabled FROM users")
 	if err != nil {
@@ -334,8 +378,59 @@ func (d *DB) UpdateDowntime(username string, schedule DowntimeSchedule) error {
 	return nil
 }
 
+// GetDowntimeOverride returns the override expiry for a user (zero time if none).
+func (d *DB) GetDowntimeOverride(username string) time.Time {
+	d.overrideMu.RLock()
+	t := d.overrideCache[username]
+	d.overrideMu.RUnlock()
+	return t
+}
+
+// SetDowntimeOverride sets a temporary downtime override that expires at until.
+func (d *DB) SetDowntimeOverride(username string, until time.Time) error {
+	raw := until.UTC().Format(time.RFC3339)
+	res, err := d.db.Exec("UPDATE users SET downtime_override_until = ? WHERE username = ?", raw, username)
+	if err != nil {
+		return fmt.Errorf("setting downtime override: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("%w: %q", ErrUnknownUser, username)
+	}
+
+	d.overrideMu.Lock()
+	d.overrideCache[username] = until.UTC()
+	d.overrideMu.Unlock()
+
+	return nil
+}
+
+// ClearDowntimeOverride removes a user's downtime override.
+func (d *DB) ClearDowntimeOverride(username string) error {
+	res, err := d.db.Exec("UPDATE users SET downtime_override_until = '' WHERE username = ?", username)
+	if err != nil {
+		return fmt.Errorf("clearing downtime override: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("%w: %q", ErrUnknownUser, username)
+	}
+
+	d.overrideMu.Lock()
+	delete(d.overrideCache, username)
+	d.overrideMu.Unlock()
+
+	return nil
+}
+
 // IsInDowntime returns whether a user is currently in a downtime window.
+// An active override suppresses downtime until the override expires.
 func (d *DB) IsInDowntime(username string) bool {
+	override := d.GetDowntimeOverride(username)
+	if !override.IsZero() && time.Now().Before(override) {
+		return false
+	}
+
 	sched := d.GetDowntime(username)
 	if len(sched) == 0 {
 		return false
@@ -461,6 +556,10 @@ func (d *DB) Delete(username string) error {
 	delete(d.downtimeCache, username)
 	d.downtimeMu.Unlock()
 
+	d.overrideMu.Lock()
+	delete(d.overrideCache, username)
+	d.overrideMu.Unlock()
+
 	d.enabledMu.Lock()
 	delete(d.enabledCache, username)
 	d.enabledMu.Unlock()
@@ -497,7 +596,7 @@ func (d *DB) ChangePassword(username, newPassword string) error {
 
 // List returns all usernames and their creation times.
 func (d *DB) List() ([]UserInfo, error) {
-	rows, err := d.db.Query("SELECT username, created_at, dns_server, dns_protocol, port, enabled, downtime_schedule FROM users ORDER BY username")
+	rows, err := d.db.Query("SELECT username, created_at, dns_server, dns_protocol, port, enabled, downtime_schedule, downtime_override_until FROM users ORDER BY username")
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)
 	}
@@ -507,13 +606,18 @@ func (d *DB) List() ([]UserInfo, error) {
 	for rows.Next() {
 		var u UserInfo
 		var enabled int
-		var rawDowntime string
-		if err := rows.Scan(&u.Username, &u.CreatedAt, &u.DNSServer, &u.DNSProtocol, &u.Port, &enabled, &rawDowntime); err != nil {
+		var rawDowntime, rawOverride string
+		if err := rows.Scan(&u.Username, &u.CreatedAt, &u.DNSServer, &u.DNSProtocol, &u.Port, &enabled, &rawDowntime, &rawOverride); err != nil {
 			return nil, fmt.Errorf("scanning user: %w", err)
 		}
 		u.Enabled = enabled != 0
 		if rawDowntime != "" {
 			json.Unmarshal([]byte(rawDowntime), &u.DowntimeSchedule)
+		}
+		if rawOverride != "" {
+			if t, err := time.Parse(time.RFC3339, rawOverride); err == nil && t.After(time.Now()) {
+				u.DowntimeOverrideUntil = rawOverride
+			}
 		}
 		users = append(users, u)
 	}

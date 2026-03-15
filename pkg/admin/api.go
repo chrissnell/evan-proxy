@@ -504,6 +504,53 @@ func (a *api) handleUpdateDowntime(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+type overrideRequest struct {
+	Username        string `json:"username"`
+	DurationMinutes int    `json:"duration_minutes"`
+}
+
+func (a *api) handleDowntimeOverride(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req overrideRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.Username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	if req.DurationMinutes <= 0 {
+		// Clear override
+		if err := a.users.ClearDowntimeOverride(req.Username); err != nil {
+			if errors.Is(err, userdb.ErrUnknownUser) {
+				http.Error(w, "user not found", http.StatusNotFound)
+				return
+			}
+			a.logger.Errorf("admin", "clear downtime override: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		until := time.Now().Add(time.Duration(req.DurationMinutes) * time.Minute)
+		if err := a.users.SetDowntimeOverride(req.Username, until); err != nil {
+			if errors.Is(err, userdb.ErrUnknownUser) {
+				http.Error(w, "user not found", http.StatusNotFound)
+				return
+			}
+			a.logger.Errorf("admin", "set downtime override: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (a *api) handleLogs(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

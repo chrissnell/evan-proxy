@@ -212,6 +212,7 @@ button:hover {
 .status-enabled { color: var(--accent); }
 .status-disabled { color: var(--danger); }
 .status-downtime { color: var(--warn); }
+.status-override { color: var(--purple); }
 
 .dot {
   display: inline-block;
@@ -235,6 +236,11 @@ button:hover {
 .dot-downtime {
   background: var(--warn);
   box-shadow: 0 0 6px var(--warn);
+}
+
+.dot-override {
+  background: var(--purple);
+  box-shadow: 0 0 6px var(--purple);
 }
 
 .header {
@@ -630,6 +636,22 @@ button:hover {
 
 .btn-enabled { color: var(--accent); border-color: var(--accent); }
 .btn-disabled { color: var(--purple); border-color: var(--purple); }
+
+.btn-override { color: var(--purple); border-color: var(--purple); }
+.btn-override:hover { background: var(--purple); color: var(--bg); }
+
+.override-options {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.override-options .label {
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+  margin-right: 0.25rem;
+}
 
 .dns-test-ok { color: var(--accent); font-size: 0.85rem; }
 .dns-test-fail { color: var(--danger); font-size: 0.85rem; }

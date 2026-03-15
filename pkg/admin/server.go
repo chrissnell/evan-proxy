@@ -54,6 +54,7 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 	mux.HandleFunc("/api/users/dns/test", a.requireSession(a.handleTestDNS))
 	mux.HandleFunc("/api/users/enabled", a.requireSession(a.handleSetEnabled))
 	mux.HandleFunc("/api/users/downtime", a.requireSession(a.handleUpdateDowntime))
+	mux.HandleFunc("/api/users/downtime-override", a.requireSession(a.handleDowntimeOverride))
 
 	// Version (no auth)
 	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {

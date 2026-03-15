@@ -166,10 +166,15 @@ function renderUsers(users) {
     var delBtn = deleteConfirm === u.username
       ? '<button class="btn-sm btn-danger-confirm" onclick="confirmDelete(\'' + esc + '\')">confirm?</button>'
       : '<button class="btn-sm btn-danger" onclick="startDelete(\'' + esc + '\')">delete</button>';
+    var hasOverride = u.downtime_override_until && new Date(u.downtime_override_until) > new Date();
+    var inDowntime = u.enabled && checkDowntimeClient(u.downtime_schedule);
     var statusIndicator;
     if (!u.enabled) {
       statusIndicator = '<span class="dot dot-disabled"></span><span class="status-label status-disabled">disabled</span>';
-    } else if (checkDowntimeClient(u.downtime_schedule)) {
+    } else if (hasOverride) {
+      var remaining = fmtRemaining(new Date(u.downtime_override_until));
+      statusIndicator = '<span class="dot dot-override"></span><span class="status-label status-override">override ' + remaining + '</span>';
+    } else if (inDowntime) {
       statusIndicator = '<span class="dot dot-downtime"></span><span class="status-label status-downtime">downtime</span>';
     } else {
       statusIndicator = '<span class="dot dot-enabled"></span><span class="status-label status-enabled">enabled</span>';
@@ -177,6 +182,12 @@ function renderUsers(users) {
     var toggleBtn = u.enabled
       ? '<button class="btn-sm btn-disabled" onclick="toggleEnabled(\'' + esc + '\',' + u.enabled + ')">disable</button>'
       : '<button class="btn-sm btn-enabled" onclick="toggleEnabled(\'' + esc + '\',' + u.enabled + ')">enable</button>';
+    var overrideBtn = '';
+    if (hasOverride) {
+      overrideBtn = '<button class="btn-sm btn-override" onclick="cancelOverride(\'' + esc + '\')">cancel override</button>';
+    } else if (inDowntime) {
+      overrideBtn = '<button class="btn-sm btn-override" onclick="toggleEdit(\'' + esc + '\',\'override\')">override</button>';
+    }
     rows.push('<tr>' +
       '<td>' + escHtml(u.username) + '</td>' +
       '<td class="dim">' + escHtml(created) + '</td>' +
@@ -185,6 +196,7 @@ function renderUsers(users) {
       '<td class="user-status">' + statusIndicator + '</td>' +
       '<td class="user-actions">' +
         toggleBtn +
+        overrideBtn +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'schedule\')">schedule</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'port\')">port</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'dns\')">dns</button>' +
@@ -193,6 +205,7 @@ function renderUsers(users) {
       '</td></tr>');
     if (editingUser === u.username) {
       if (editingField === 'schedule') rows.push(renderScheduleEditRow(u));
+      else if (editingField === 'override') rows.push(renderOverrideEditRow(u));
       else if (editingField === 'port') rows.push(renderPortEditRow(u));
       else if (editingField === 'dns') rows.push(renderDNSEditRow(u));
       else if (editingField === 'password') rows.push(renderPasswordEditRow(u));
@@ -446,6 +459,70 @@ async function saveDNS(username) {
   delete dnsEditProto[username];
   editingUser = null;
   editingField = null;
+  refreshUsers();
+}
+
+// --- Downtime Override ---
+function fmtRemaining(until) {
+  var ms = until - new Date();
+  if (ms <= 0) return '';
+  var totalMin = Math.ceil(ms / 60000);
+  if (totalMin < 60) return totalMin + 'm';
+  var h = Math.floor(totalMin / 60);
+  var m = totalMin % 60;
+  return m > 0 ? h + 'h ' + m + 'm' : h + 'h';
+}
+
+function renderOverrideEditRow(u) {
+  var esc = escAttr(u.username);
+  var durations = [
+    {min: 15, label: '15 min'},
+    {min: 30, label: '30 min'},
+    {min: 60, label: '1 hour'},
+    {min: 120, label: '2 hours'},
+    {min: 360, label: '6 hours'},
+    {min: 720, label: '12 hours'}
+  ];
+  var btns = durations.map(function(d) {
+    return '<button class="btn-sm btn-override" onclick="setOverride(\'' + esc + '\',' + d.min + ')">' + d.label + '</button>';
+  }).join('');
+  return '<tr class="inline-edit-row">' +
+    '<td colspan="6" class="inline-edit-cell">' +
+      '<div class="inline-edit-form">' +
+        '<span class="override-options">' +
+          '<span class="label">suspend downtime for:</span>' +
+          btns +
+        '</span>' +
+        '<span class="edit-actions">' +
+          '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+        '</span>' +
+      '</div>' +
+    '</td></tr>';
+}
+
+async function setOverride(username, minutes) {
+  showUsersError('');
+  var resp = await fetch('/api/users/downtime-override', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, duration_minutes: minutes})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showUsersError('failed to set override'); return; }
+  editingUser = null;
+  editingField = null;
+  refreshUsers();
+}
+
+async function cancelOverride(username) {
+  showUsersError('');
+  var resp = await fetch('/api/users/downtime-override', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, duration_minutes: 0})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showUsersError('failed to cancel override'); return; }
   refreshUsers();
 }
 
@@ -705,6 +782,7 @@ async function saveSchedule(username) {
 }
 
 refreshUsers();
+setInterval(refreshUsers, 30000);
 
 // --- Top Sites & Blocked ---
 function renderList(id, items) {
