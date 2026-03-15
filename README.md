@@ -36,7 +36,7 @@ To make this work, follow this plan:
 - Rate-limiting on authentication failures to prevent password brute-forcing
 - DNS-over-TLS (DoT) and DNS-over-HTTPS (DoH) support
 - DNS-level block detection (returns 523 for DNS-blocked domains)
-- Downtime schedules — set per-user internet access windows by day of week
+- Downtime schedules — set per-user internet access windows by day of week, with support for multiple windows per day and overnight spans; temporary overrides let you suspend downtime for 15 minutes to 12 hours without changing the schedule
 - Prometheus metrics endpoint (`/metrics`)
 
 ## Configuration
@@ -79,7 +79,9 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 
 Each user can have a downtime schedule that blocks proxy access during specified hours on each day of the week. Schedules are configured through the admin UI using your local time (e.g. "no internet from 9:00 PM to 7:00 AM on school nights").
 
-Overnight windows that cross midnight are handled automatically — a window from 21:00 to 07:00 on Monday means access is blocked from Monday 9 PM through Tuesday 7 AM.
+You can add multiple downtime windows per day — for example, block access during school hours (8 AM–3 PM) and again at bedtime (9 PM–7 AM). Overnight windows that cross midnight are handled automatically — a window from 21:00 to 07:00 on Monday means access is blocked from Monday 9 PM through Tuesday 7 AM.
+
+**Temporary overrides.** When a user is currently in downtime, the admin UI shows an "override" button that lets you temporarily re-enable proxy access for a chosen duration (15 minutes to 12 hours). The override suppresses all scheduled downtime until it expires — even if a new downtime window starts during the override period. Active overrides display a countdown in the UI and can be cancelled at any time.
 
 **Timezone configuration is required.** The server evaluates downtime schedules against its local clock, so it must be set to your timezone. In Kubernetes, set the `TZ` environment variable (the Docker image includes `tzdata`). The Helm chart exposes this as the `timezone` value:
 
