@@ -112,6 +112,19 @@ func (h *Handler) reconcileListeners() {
 		}
 	}
 
+	h.portMu.Unlock()
+
+	// Shut down stopped listeners before starting new ones to avoid
+	// "address already in use" if a port transitions stop→start.
+	for _, s := range toStop {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		s.srv.Shutdown(ctx)
+		cancel()
+		h.logger.Infof("userports", "reconcile: stopped listener on :%d", s.port)
+	}
+
+	h.portMu.Lock()
+
 	// Start listeners that should be running but aren't
 	for port, username := range shouldRun {
 		if _, running := h.userServers[port]; !running {
@@ -121,14 +134,6 @@ func (h *Handler) reconcileListeners() {
 	}
 
 	h.portMu.Unlock()
-
-	// Shut down stopped listeners outside the lock
-	for _, s := range toStop {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		s.srv.Shutdown(ctx)
-		cancel()
-		h.logger.Infof("userports", "reconcile: stopped listener on :%d", s.port)
-	}
 }
 
 // startListenerLocked starts a listener for a single port. Caller must hold portMu.
@@ -149,6 +154,13 @@ func (h *Handler) startListenerLocked(port int, username string) {
 		h.logger.Infof("userports", "listening on :%d for %q", port, username)
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 			h.logger.Errorf("userports", "port %d: %v", port, err)
+			// Remove from maps so the reconciler can retry on the next tick
+			h.portMu.Lock()
+			if h.userServers[port] == srv {
+				delete(h.userServers, port)
+				delete(h.portUsers, port)
+			}
+			h.portMu.Unlock()
 		}
 	}()
 }

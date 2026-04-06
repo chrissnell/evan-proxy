@@ -547,6 +547,15 @@ func (a *api) handleDowntimeOverride(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		// Immediately start the user's dedicated port listener so they
+		// don't have to wait for the next reconciler tick.
+		users, _ := a.users.List()
+		for _, u := range users {
+			if u.Username == req.Username && u.Port > 0 {
+				a.ports.StartListener(req.Username, u.Port)
+				break
+			}
+		}
 	}
 	w.WriteHeader(http.StatusOK)
 }
