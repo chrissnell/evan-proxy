@@ -202,6 +202,72 @@ func TestPlainHTTPForward(t *testing.T) {
 	}
 }
 
+// TestConnectTunnelPropagatesServerClose verifies that when the upstream server
+// closes its side of a CONNECT tunnel, the FIN is propagated to the client so a
+// response whose body is delimited by connection close terminates cleanly. This
+// guards the half-close fix: without it, the client hangs waiting for bytes that
+// never arrive — the failure mode that broke connection-reuse-heavy iOS apps.
+func TestConnectTunnelPropagatesServerClose(t *testing.T) {
+	// Raw target that writes an EOF-delimited HTTP/1.1 response, then closes.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		br := bufio.NewReader(c)
+		http.ReadRequest(br) // consume the tunneled request
+		// No Content-Length: body is delimited by the connection close.
+		io.WriteString(c, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\ngoodbye")
+		c.Close()
+	}()
+
+	handler := setupProxy(t)
+	proxySrv := httptest.NewServer(handler)
+	defer proxySrv.Close()
+
+	conn, err := net.Dial("tcp", proxySrv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	targetAddr := ln.Addr().String()
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: %s\r\n\r\n",
+		targetAddr, targetAddr, basicAuth("alice", "secret"))
+
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("reading CONNECT response: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// Send a request and read the EOF-delimited response. If the server's FIN
+	// is not propagated, the read blocks until this deadline fires.
+	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: %s\r\n\r\n", targetAddr)
+
+	tunnelResp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("reading tunneled response: %v", err)
+	}
+	body, err := io.ReadAll(tunnelResp.Body)
+	tunnelResp.Body.Close()
+	if err != nil {
+		t.Fatalf("reading body (tunnel likely hung — FIN not propagated): %v", err)
+	}
+	if string(body) != "goodbye" {
+		t.Errorf("body = %q, want 'goodbye'", body)
+	}
+}
+
 // TestPlainHTTPNoAuth tests that unauthenticated plain HTTP gets 407.
 func TestPlainHTTPNoAuth(t *testing.T) {
 	handler := setupProxy(t)
@@ -215,6 +281,30 @@ func TestPlainHTTPNoAuth(t *testing.T) {
 	}
 	if w.Header().Get("Proxy-Authenticate") == "" {
 		t.Error("missing Proxy-Authenticate on 407")
+	}
+}
+
+func TestFormatHeadersRedactsSensitive(t *testing.T) {
+	h := http.Header{}
+	h.Set("Proxy-Authorization", "Basic c2VjcmV0")
+	h.Set("Cookie", "session=abc")
+	h.Set("User-Agent", "Venmo/1.0")
+	h.Add("Accept", "application/json")
+
+	got := formatHeaders(h)
+
+	if strings.Contains(got, "c2VjcmV0") || strings.Contains(got, "session=abc") {
+		t.Errorf("sensitive value leaked: %q", got)
+	}
+	if !strings.Contains(got, "Proxy-Authorization=<redacted>") {
+		t.Errorf("Proxy-Authorization not redacted: %q", got)
+	}
+	if !strings.Contains(got, "User-Agent=Venmo/1.0") {
+		t.Errorf("non-sensitive header missing: %q", got)
+	}
+	// Keys must be sorted for stable output.
+	if strings.Index(got, "Accept=") > strings.Index(got, "User-Agent=") {
+		t.Errorf("headers not sorted: %q", got)
 	}
 }
 

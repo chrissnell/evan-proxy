@@ -39,6 +39,12 @@ type Config struct {
 	// Logging — console
 	LogFormat string // "json" or "human"
 
+	// LogHeaders enables verbose per-request header logging on the plain-HTTP
+	// forward path, showing inbound headers, which hop-by-hop headers were
+	// stripped, and the exact headers forwarded upstream. Diagnostic only —
+	// noisy and may expose sensitive header values, so keep off by default.
+	LogHeaders bool
+
 	// Logging — network (optional, independent of console)
 	LogNetMode          string        // "json-udp" or "json-http", empty = disabled
 	LogNetAddr          string        // UDP: "host:port", HTTP: "http://host:port/path"
@@ -48,21 +54,22 @@ type Config struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		ProxyDBPath:        envOr("PROXY_DB_PATH", "/data/evan-proxy/users.db"),
-		AdminListen:        envOr("ADMIN_LISTEN", ":9090"),
-		AdminUser:          os.Getenv("ADMIN_USER"),
-		AdminPassword:      os.Getenv("ADMIN_PASSWORD"),
-		DNSServer:          os.Getenv("DNS_SERVER"),
-		DNSProtocol:        envOr("DNS_PROTOCOL", "plain"),
-		AuthRetryTimeout:   envDuration("AUTH_RETRY_TIMEOUT", 5*time.Second),
-		ConnectDialTimeout: envDuration("CONNECT_DIAL_TIMEOUT", 10*time.Second),
-		IdleTimeout:        envDuration("IDLE_TIMEOUT", 300*time.Second),
-		HTTPTimeout:        envDuration("HTTP_TIMEOUT", 30*time.Second),
-		AuthFailRateLimit:  envInt("AUTH_FAIL_RATE_LIMIT", 5),
-		AuthFailWindow:     envDuration("AUTH_FAIL_WINDOW", 60*time.Second),
-		UserPortMin:        envInt("USER_PORT_MIN", 8081),
-		UserPortMax:        envInt("USER_PORT_MAX", 8090),
-		LogFormat:          envOr("LOG_FORMAT", "human"),
+		ProxyDBPath:         envOr("PROXY_DB_PATH", "/data/evan-proxy/users.db"),
+		AdminListen:         envOr("ADMIN_LISTEN", ":9090"),
+		AdminUser:           os.Getenv("ADMIN_USER"),
+		AdminPassword:       os.Getenv("ADMIN_PASSWORD"),
+		DNSServer:           os.Getenv("DNS_SERVER"),
+		DNSProtocol:         envOr("DNS_PROTOCOL", "plain"),
+		AuthRetryTimeout:    envDuration("AUTH_RETRY_TIMEOUT", 5*time.Second),
+		ConnectDialTimeout:  envDuration("CONNECT_DIAL_TIMEOUT", 10*time.Second),
+		IdleTimeout:         envDuration("IDLE_TIMEOUT", 300*time.Second),
+		HTTPTimeout:         envDuration("HTTP_TIMEOUT", 30*time.Second),
+		AuthFailRateLimit:   envInt("AUTH_FAIL_RATE_LIMIT", 5),
+		AuthFailWindow:      envDuration("AUTH_FAIL_WINDOW", 60*time.Second),
+		UserPortMin:         envInt("USER_PORT_MIN", 8081),
+		UserPortMax:         envInt("USER_PORT_MAX", 8090),
+		LogFormat:           envOr("LOG_FORMAT", "human"),
+		LogHeaders:          envBool("LOG_HEADERS", false),
 		LogNetMode:          os.Getenv("LOG_NET_MODE"),
 		LogNetAddr:          os.Getenv("LOG_NET_ADDR"),
 		LogNetBatchSize:     envInt("LOG_NET_BATCH_SIZE", 100),
@@ -127,6 +134,18 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+func envBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return b
 }
 
 func envInt(key string, fallback int) int {
