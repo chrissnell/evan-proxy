@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"evan-proxy/pkg/logging"
@@ -114,14 +116,25 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 
 	// Strip hop-by-hop headers before forwarding
 	outReq := r.Clone(ctx)
-	for _, h := range hopByHopHeaders {
-		outReq.Header.Del(h)
+	var stripped []string
+	for _, hdr := range hopByHopHeaders {
+		if outReq.Header.Get(hdr) != "" {
+			stripped = append(stripped, hdr)
+		}
+		outReq.Header.Del(hdr)
 	}
 	// Don't add X-Forwarded-For (privacy)
+	if outReq.Header.Get("X-Forwarded-For") != "" {
+		stripped = append(stripped, "X-Forwarded-For")
+	}
 	outReq.Header.Del("X-Forwarded-For")
 
 	// Convert to a standard request (remove proxy absolute URI)
 	outReq.RequestURI = ""
+
+	if h.cfg.LogHeaders {
+		h.logForwardHeaders(clientIP, user, r, outReq, stripped)
+	}
 
 	resp, err := h.transport.RoundTrip(outReq)
 	if err != nil {
@@ -163,6 +176,52 @@ func (h *Handler) handleForward(w http.ResponseWriter, r *http.Request) {
 		DurationMS:   time.Since(start).Milliseconds(),
 		BytesWritten: cw.Total(),
 	})
+}
+
+// sensitiveHeaders are redacted in header dumps to avoid logging credentials.
+var sensitiveHeaders = map[string]bool{
+	"Proxy-Authorization": true,
+	"Authorization":       true,
+	"Cookie":              true,
+	"Set-Cookie":          true,
+}
+
+// logForwardHeaders emits a diagnostic dump of the inbound request headers, the
+// hop-by-hop headers stripped by the proxy, and the exact headers forwarded
+// upstream. It exists to answer "is the proxy modifying requests?" — enable it
+// with LOG_HEADERS=true. Sensitive values are redacted. This only covers the
+// plain-HTTP forward path; CONNECT (HTTPS) traffic is an opaque TCP tunnel and
+// its request/response headers are encrypted end-to-end and never touched.
+func (h *Handler) logForwardHeaders(clientIP, user string, in, out *http.Request, stripped []string) {
+	strippedStr := "(none)"
+	if len(stripped) > 0 {
+		strippedStr = strings.Join(stripped, ", ")
+	}
+	h.logger.Infof("headers", "forward %s %s user=%s client=%s\n  inbound:  %s\n  stripped: %s\n  outbound: %s",
+		in.Method, in.URL, user, clientIP,
+		formatHeaders(in.Header), strippedStr, formatHeaders(out.Header))
+}
+
+// formatHeaders renders headers as a stable, single-line "k=v; k=v" string with
+// sensitive values redacted.
+func formatHeaders(hdr http.Header) string {
+	keys := make([]string, 0, len(hdr))
+	for k := range hdr {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v := strings.Join(hdr.Values(k), ",")
+		if sensitiveHeaders[http.CanonicalHeaderKey(k)] {
+			v = "<redacted>"
+		}
+		parts = append(parts, k+"="+v)
+	}
+	if len(parts) == 0 {
+		return "(none)"
+	}
+	return strings.Join(parts, "; ")
 }
 
 func isHopByHop(header string) bool {

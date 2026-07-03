@@ -13,6 +13,10 @@ logging:
   # Console output (stdout) — always active
   console:
     format: "human"    # "human" or "json"
+  # Verbose per-request header logging on the plain-HTTP forward path.
+  # Diagnostic only — noisy; credentials are redacted. HTTPS (CONNECT) is an
+  # opaque tunnel and its headers are never logged.
+  headers: false
   # Network logging — optional, runs alongside console
   net:
     mode: ""             # "json-udp" or "json-http", empty = disabled

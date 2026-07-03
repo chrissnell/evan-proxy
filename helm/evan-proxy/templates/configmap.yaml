@@ -8,6 +8,8 @@ data:
   ADMIN_LISTEN: {{ .Values.admin.listen | quote }}
   # Console logging
   LOG_FORMAT: {{ .Values.logging.console.format | quote }}
+  # Verbose per-request header logging (plain-HTTP forward path only)
+  LOG_HEADERS: {{ .Values.logging.headers | default false | quote }}
   # Network logging (independent of console)
   {{- if .Values.logging.net.mode }}
   LOG_NET_MODE: {{ .Values.logging.net.mode | quote }}

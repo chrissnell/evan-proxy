@@ -13,6 +13,21 @@ import (
 	"evan-proxy/pkg/logging"
 )
 
+// closeWriter is implemented by connections supporting a TCP half-close
+// (*net.TCPConn and anything wrapping it).
+type closeWriter interface {
+	CloseWrite() error
+}
+
+// halfCloseWrite shuts down the write half of c if supported, sending a FIN to
+// the peer while leaving the read half open. Errors are ignored: the connection
+// may already be closed, which is a benign race during tunnel teardown.
+func halfCloseWrite(c net.Conn) {
+	if cw, ok := c.(closeWriter); ok {
+		_ = cw.CloseWrite()
+	}
+}
+
 // handleConnect handles CONNECT requests with the iOS-compatible 407 flow.
 // Hijacks the connection to write raw HTTP responses, keeping the TCP
 // connection alive through the auth challenge-response cycle.
@@ -175,7 +190,15 @@ func (h *Handler) connectTunnel(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx 
 		Host: host, User: user, Status: 200,
 	})
 
-	// Bidirectional copy with live byte counting
+	// Bidirectional copy with live byte counting.
+	//
+	// Each direction half-closes the write side of the *peer* connection when
+	// its copy finishes. This propagates a FIN in both directions: without it,
+	// when the upstream server closes (or delimits a response body by closing
+	// the connection, as HTTP/1.1 "Connection: close" responses do), the client
+	// never learns the response is complete and hangs waiting for more bytes.
+	// Connection-pooling clients (e.g. native iOS apps) are especially sensitive
+	// to this; browsers tend to open fresh, short-lived connections and mask it.
 	readCounter := h.counter.NewWriter(targetConn, true)
 	writeCounter := h.counter.NewWriter(conn, false)
 	var wg sync.WaitGroup
@@ -190,9 +213,7 @@ func (h *Handler) connectTunnel(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx 
 		}()
 		io.Copy(readCounter, bufrw) // client -> target
 		readCounter.Close()
-		if tc, ok := targetConn.(*net.TCPConn); ok {
-			tc.CloseWrite()
-		}
+		halfCloseWrite(targetConn) // tell target: no more client data
 	}()
 
 	go func() {
@@ -204,6 +225,7 @@ func (h *Handler) connectTunnel(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx 
 		}()
 		io.Copy(writeCounter, targetConn) // target -> client
 		writeCounter.Close()
+		halfCloseWrite(conn) // tell client: no more server data (propagates FIN)
 	}()
 
 	wg.Wait()

@@ -73,6 +73,7 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `AUTH_FAIL_RATE_LIMIT` | `5` | Failed auth attempts before rate limiting kicks in |
 | `AUTH_FAIL_WINDOW` | `60s` | Sliding window for rate limiting |
 | `LOG_FORMAT` | `human` | Log format: `json` or `human` |
+| `LOG_HEADERS` | `false` | When `true`, log per-request headers on the plain-HTTP forward path: inbound headers, which hop-by-hop headers were stripped, and the exact headers forwarded upstream. Diagnostic only — verbose, and credentials are redacted. HTTPS (`CONNECT`) traffic is an opaque TCP tunnel whose headers are never inspected or modified. |
 | `TZ` | | IANA timezone for downtime schedules (e.g. `America/Denver`) |
 
 ## Downtime Schedules
