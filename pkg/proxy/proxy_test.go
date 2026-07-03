@@ -68,6 +68,58 @@ func basicAuth(user, pass string) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
 }
 
+// TestPACServedUnauthenticated verifies the PAC endpoint is served without auth
+// and hands back the request's own Host as the proxy endpoint (the exact
+// host:port the device used), with the configured bypass domains routed DIRECT.
+func TestPACServedUnauthenticated(t *testing.T) {
+	h := setupProxy(t)
+	h.cfg.PACEnabled = true
+	h.cfg.PACPath = "/proxy.pac"
+	h.cfg.PACBypassDomains = []string{"venmo.com", "paypal.com"}
+
+	req := httptest.NewRequest("GET", "/proxy.pac", nil)
+	req.Host = "proxy.chrissnell.com:17001"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("PAC status = %d, want 200 (no auth expected)", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/x-ns-proxy-autoconfig" {
+		t.Errorf("content-type = %q", ct)
+	}
+	if w.Header().Get("Proxy-Authenticate") != "" {
+		t.Error("PAC must not require proxy auth")
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `return "PROXY proxy.chrissnell.com:17001"`) {
+		t.Errorf("PAC did not echo request Host:\n%s", body)
+	}
+	if !strings.Contains(body, `"venmo.com"`) || !strings.Contains(body, `return "DIRECT"`) {
+		t.Errorf("PAC missing bypass rule:\n%s", body)
+	}
+	// The PAC must never leak credentials.
+	for _, bad := range []string{"Basic ", "secret", "Proxy-Authorization"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("PAC contains %q", bad)
+		}
+	}
+}
+
+// TestPACDisabledFallsThrough verifies that when PAC is off, a GET for the PAC
+// path is treated as a normal proxy request (which requires auth → 407).
+func TestPACDisabledFallsThrough(t *testing.T) {
+	h := setupProxy(t) // PACEnabled defaults to false
+
+	req := httptest.NewRequest("GET", "/proxy.pac", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != 407 {
+		t.Fatalf("status = %d, want 407 when PAC disabled", w.Code)
+	}
+}
+
 // TestIOSConnectFlow simulates iOS behavior: CONNECT without auth → 407 → retry with auth on same TCP connection.
 func TestIOSConnectFlow(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

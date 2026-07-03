@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -50,6 +51,17 @@ type Config struct {
 	LogNetAddr          string        // UDP: "host:port", HTTP: "http://host:port/path"
 	LogNetBatchSize     int           // json-http only: max entries before flush
 	LogNetFlushInterval time.Duration // json-http only: max time between flushes
+
+	// PAC (proxy auto-config) — optional. When enabled, the proxy answers an
+	// unauthenticated GET at PACPath on each proxy port with a PAC file so
+	// specific domains can be routed DIRECT (bypassing the proxy) via an iOS
+	// "Auto" Global HTTP Proxy. The PAC contains only routing rules — never any
+	// credentials. It is served on the proxy port itself, so the PAC URL is the
+	// same endpoint the client already uses.
+	PACEnabled       bool     // serve the PAC endpoint
+	PACPath          string   // request path the PAC is served at (default "/proxy.pac")
+	PACProxyEndpoint string   // proxy "host:port" the PAC returns; empty = echo request Host
+	PACBypassDomains []string // domain suffixes routed DIRECT (bypass proxy)
 }
 
 func Load() (*Config, error) {
@@ -74,6 +86,11 @@ func Load() (*Config, error) {
 		LogNetAddr:          os.Getenv("LOG_NET_ADDR"),
 		LogNetBatchSize:     envInt("LOG_NET_BATCH_SIZE", 100),
 		LogNetFlushInterval: envDuration("LOG_NET_FLUSH_INTERVAL", 5*time.Second),
+		PACEnabled:          envBool("PAC_ENABLED", false),
+		PACPath:             envOr("PAC_PATH", "/proxy.pac"),
+		PACProxyEndpoint:    os.Getenv("PAC_PROXY_ENDPOINT"),
+		PACBypassDomains: envCSV("PAC_BYPASS_DOMAINS",
+			[]string{"venmo.com", "paypal.com", "paypalobjects.com", "braintreegateway.com", "braintree-api.com"}),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -114,6 +131,9 @@ func (c *Config) validate() error {
 	if c.LogNetMode != "" && c.LogNetAddr == "" {
 		return fmt.Errorf("LOG_NET_ADDR is required when LOG_NET_MODE is %q", c.LogNetMode)
 	}
+	if c.PACEnabled && c.PACPath == "" {
+		return fmt.Errorf("PAC_PATH must not be empty when PAC_ENABLED is true")
+	}
 	return nil
 }
 
@@ -134,6 +154,25 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// envCSV parses a comma-separated env var into a trimmed, non-empty slice.
+// Returns fallback when the var is unset or empty.
+func envCSV(key string, fallback []string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if s := strings.TrimSpace(part); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return out
 }
 
 func envBool(key string, fallback bool) bool {

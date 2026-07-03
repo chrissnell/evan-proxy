@@ -14,6 +14,7 @@ import (
 	"evan-proxy/pkg/config"
 	edns "evan-proxy/pkg/dns"
 	"evan-proxy/pkg/logging"
+	"evan-proxy/pkg/pac"
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
 )
@@ -303,11 +304,49 @@ func portOwnerFromCtx(r *http.Request) string {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.isPACRequest(r) {
+		h.servePAC(w, r)
+		return
+	}
 	if r.Method == http.MethodConnect {
 		h.handleConnect(w, r)
 	} else {
 		h.handleForward(w, r)
 	}
+}
+
+// isPACRequest reports whether r is a direct (non-proxied) GET for the PAC file.
+// Real proxy requests are CONNECT or carry an absolute URI (URL.Host set), so a
+// GET with an empty URL.Host and the configured path is unambiguously a direct
+// PAC fetch — never a request to be proxied.
+func (h *Handler) isPACRequest(r *http.Request) bool {
+	return h.cfg.PACEnabled &&
+		r.Method == http.MethodGet &&
+		r.URL.Host == "" &&
+		r.URL.Path == h.cfg.PACPath
+}
+
+// servePAC returns the PAC file, unauthenticated. The proxy endpoint the PAC
+// hands back is PAC_PROXY_ENDPOINT if configured, otherwise the request's own
+// Host — i.e. the exact host:port the client used to fetch the PAC, which is
+// also the endpoint it should proxy through. The PAC carries no credentials.
+func (h *Handler) servePAC(w http.ResponseWriter, r *http.Request) {
+	endpoint := h.cfg.PACProxyEndpoint
+	if endpoint == "" {
+		endpoint = r.Host
+	}
+	if endpoint == "" {
+		http.Error(w, "cannot determine proxy endpoint", http.StatusBadRequest)
+		return
+	}
+	body := pac.Generate(endpoint, h.cfg.PACBypassDomains)
+	w.Header().Set("Content-Type", pac.ContentType)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write([]byte(body))
+	h.logger.Log(logging.Entry{
+		Timestamp: time.Now(), ClientIP: clientAddr(r), Method: r.Method,
+		Host: r.Host, URI: r.URL.Path, Status: 200, Event: "pac",
+	})
 }
 
 // clientAddr extracts the client IP without port.

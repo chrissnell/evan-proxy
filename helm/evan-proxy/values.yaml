@@ -37,6 +37,24 @@ proxy:
   userPortMin: 8080  # start of per-user dedicated port range
   userPortMax: 8090  # end of per-user dedicated port range (11 ports)
 
+# PAC (proxy auto-config) — optional.
+# When enabled, the proxy answers an unauthenticated GET at `path` on each proxy
+# port with a PAC file, so specific domains can bypass the proxy (routed DIRECT)
+# via an iOS "Auto" Global HTTP Proxy. Because it is served on the proxy port
+# itself, the PAC URL is the same endpoint the device already uses:
+#   http://<proxy-host>:<proxy-port><path>
+# The PAC contains only routing rules — never any credentials.
+pac:
+  enabled: false
+  path: "/proxy.pac"
+  # Proxy "host:port" the PAC hands back. Empty = echo the request's own Host
+  # (the exact endpoint the device used to fetch the PAC), which is correct for
+  # NAT/port-forward setups and needs no per-user configuration.
+  proxyEndpoint: ""
+  # Domain suffixes routed DIRECT. Empty = built-in default
+  # (venmo.com, paypal.com, paypalobjects.com, braintreegateway.com, braintree-api.com).
+  bypassDomains: []
+
 # Persistent storage for SQLite user database
 persistence:
   enabled: true
