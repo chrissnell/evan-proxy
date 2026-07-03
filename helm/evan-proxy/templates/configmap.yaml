@@ -33,6 +33,19 @@ data:
   {{- end }}
   USER_PORT_MIN: {{ .Values.proxy.userPortMin | quote }}
   USER_PORT_MAX: {{ .Values.proxy.userPortMax | quote }}
+  {{- if .Values.pac.enabled }}
+  # PAC endpoint — served on the proxy port at PAC_PATH; contains no credentials
+  PAC_ENABLED: "true"
+  {{- if .Values.pac.path }}
+  PAC_PATH: {{ .Values.pac.path | quote }}
+  {{- end }}
+  {{- if .Values.pac.proxyEndpoint }}
+  PAC_PROXY_ENDPOINT: {{ .Values.pac.proxyEndpoint | quote }}
+  {{- end }}
+  {{- if .Values.pac.bypassDomains }}
+  PAC_BYPASS_DOMAINS: {{ join "," .Values.pac.bypassDomains | quote }}
+  {{- end }}
+  {{- end }}
   {{- if .Values.timezone }}
   TZ: {{ .Values.timezone | quote }}
   {{- end }}

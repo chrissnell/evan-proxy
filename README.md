@@ -75,6 +75,26 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `LOG_FORMAT` | `human` | Log format: `json` or `human` |
 | `LOG_HEADERS` | `false` | When `true`, log per-request headers on the plain-HTTP forward path: inbound headers, which hop-by-hop headers were stripped, and the exact headers forwarded upstream. Diagnostic only — verbose, and credentials are redacted. HTTPS (`CONNECT`) traffic is an opaque TCP tunnel whose headers are never inspected or modified. |
 | `TZ` | | IANA timezone for downtime schedules (e.g. `America/Denver`) |
+| `PAC_ENABLED` | `false` | Serve a PAC file on the proxy port at `PAC_PATH` |
+| `PAC_PATH` | `/proxy.pac` | Request path the PAC is served at |
+| `PAC_PROXY_ENDPOINT` | | Proxy `host:port` the PAC hands back; empty = echo the request's own `Host` (works for NAT/port-forward with no per-user config) |
+| `PAC_BYPASS_DOMAINS` | `venmo.com,paypal.com,paypalobjects.com,braintreegateway.com,braintree-api.com` | Comma-separated domain suffixes routed `DIRECT` (bypassing the proxy) |
+
+## Excluding sites from the proxy (PAC)
+
+iOS's MDM **Manual** Global HTTP Proxy sends *everything* through the proxy with no bypass list. Some native apps (e.g. Venmo) gate login on device/risk signals that break when routed through a proxy, even though the same site works fine in the browser. To let specific domains bypass the proxy, switch the device to an **Auto** Global HTTP Proxy backed by a PAC file.
+
+Set `PAC_ENABLED=true` to have the proxy answer an unauthenticated `GET PAC_PATH` on each proxy port. Because it's served on the proxy port itself, the PAC URL is simply the endpoint the device already uses:
+
+```
+http://<proxy-host>:<proxy-port>/proxy.pac
+```
+
+The PAC routes `PAC_BYPASS_DOMAINS` `DIRECT` and everything else back through the same proxy endpoint. By default that endpoint is the request's own `Host` — i.e. the exact `host:port` the device used to fetch the PAC — so NAT/port-forward setups need no per-user configuration (set `PAC_PROXY_ENDPOINT` only to override).
+
+In the child's MDM profile, set the Global HTTP Proxy to **Auto** and point `ProxyPACURL` at that URL. (iOS fetches the PAC directly, not through the proxy, so the URL must be reachable off-proxy — which it is, since it's the same endpoint the device already reaches.)
+
+**Security:** a PAC contains only routing rules — hostnames and the proxy `host:port`. It never contains credentials, so the endpoint is safe to expose unauthenticated. Proxy authentication is unchanged: iOS still sends the Basic proxy password (from the MDM profile) directly to the proxy on the 407 challenge. Note that domains routed `DIRECT` are **not** filtered or logged.
 
 ## Downtime Schedules
 
