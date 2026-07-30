@@ -6,3 +6,4 @@ CLAUDE.md
 .DS_Store
 ios/.build/
 ios/.swiftpm/
+ios/App/EvanProxyApp.xcodeproj/

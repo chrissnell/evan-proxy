@@ -1,0 +1,43 @@
+name: EvanProxyApp
+options:
+  bundleIdPrefix: com.evanproxy
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  EvanProxy:
+    path: ..
+targets:
+  EvanProxyApp:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: EvanProxy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.evanproxy.app
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        CODE_SIGN_STYLE: Automatic
+  EvanProxyAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ../Tests/EvanProxyTests
+    dependencies:
+      - target: EvanProxyApp
+      - package: EvanProxy
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  EvanProxyApp:
+    build:
+      targets:
+        EvanProxyApp: all
+        EvanProxyAppTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [EvanProxyAppTests]

@@ -1,4 +1,5 @@
 import SwiftUI
+import EvanProxy
 
 @main
 struct EvanProxyApp: App {
