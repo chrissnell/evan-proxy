@@ -46,9 +46,9 @@ Small, independently testable units:
   with a single retry; explicit logout clears the Keychain; optional biometric gate.
 - **`LogStream`** — SSE reader over `URLSession.bytes`, exposed as an
   `AsyncSequence<LogEntry>`; caps at ~200 lines like the web tail.
-- **Feature views** — `DashboardView`, `UsersView` (+ per-user edit sheets:
-  schedule, port, DNS w/ test, password, override, add/delete), `LogsView`,
-  `SettingsView`. Each backed by an `@Observable` view model calling `APIClient`.
+- **Feature views** — `DashboardView`, `UsersView`, `UserDetailView`,
+  `ScheduleEditorView`, `LogsView`, `SettingsView`. Each backed by an
+  `@Observable` view model calling `APIClient`.
 - **`Theme`** — colors, font, and shared components.
 
 ## Persistent-login flow
@@ -75,6 +75,26 @@ This delivers "log in once, stays logged in" against the current session model
   glow** (enabled/disabled/downtime/override), pill buttons, danger/save variants.
 - **Graphs:** bandwidth + requests via **Swift Charts** (translucent area + line)
   reading `/api/stats/traffic`.
+
+## Users screen layout
+
+Each user is a **card** (not a cramped table row):
+
+- Name + a native iOS **Toggle** (the enable/disable master switch — the one-tap
+  daily driver).
+- A single **status chip** — one tinted pill with a leading dot and text
+  (`enabled` / `disabled` / `downtime` / `override · 45m left`), instead of a
+  separate dot-with-glow plus floating label.
+- A muted meta line (`port · dns`, or `until 6:00 AM` in downtime).
+- Contextual action buttons: `override` / `cancel override` when relevant,
+  `schedule`, and `edit`. **No overflow (`…`) button.**
+
+Rare/setup actions live in a **`UserDetailView`** opened via `edit`: an `access`
+group (enabled toggle) and a `configuration` group (schedule, port, DNS,
+password) plus `delete user`. The **schedule editor** is a per-day list with a
+native wheel time picker presented as a bottom sheet; overnight windows are
+labeled as such. This removes the inline-pill clutter and the overflow menu
+entirely. See `docs/mockups/ios-mockups-users.svg`.
 
 ## Stack
 
