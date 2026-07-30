@@ -1,0 +1,590 @@
+openapi: 3.1.0
+info:
+  title: evan-proxy Admin API
+  version: "1.0.0"
+  description: |
+    HTTP/JSON + SSE API served by the evan-proxy admin server (`pkg/admin`),
+    the same API the browser admin UI uses. It manages proxy users, their
+    per-user DNS/port/downtime configuration, and exposes live stats and a log
+    stream.
+
+    Authentication is a session cookie (`evan-proxy-session`) obtained from
+    `POST /api/login`. A native client (e.g. the iOS app) can rely on
+    `URLSession`'s cookie store to send it automatically. The cookie carries a
+    sliding 24h TTL and the session store is in-memory, so a client that wants
+    a "log in once" experience should keep the credentials in the Keychain and
+    silently re-authenticate whenever it receives a `401`.
+
+    Error responses are `text/plain` today (the handlers use `http.Error`); the
+    body is a short human-readable message. Clients should key off the status
+    code, not the body text.
+servers:
+  - url: https://proxy.example.com
+    description: evan-proxy admin server (host/port is deployment-specific)
+
+security:
+  - sessionCookie: []
+
+tags:
+  - name: auth
+  - name: users
+  - name: dns
+  - name: downtime
+  - name: stats
+  - name: system
+
+paths:
+  /api/login:
+    post:
+      tags: [auth]
+      summary: Log in and receive a session cookie
+      description: |
+        Validates the admin credentials (bcrypt). On success sets the
+        `evan-proxy-session` cookie (HttpOnly, SameSite=Strict, Max-Age 86400).
+        Response time is floored at 200ms to blunt timing attacks.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '200':
+          description: Authenticated; session cookie set.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: "evan-proxy-session=<token>; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+
+  /api/logout:
+    post:
+      tags: [auth]
+      summary: Log out and clear the session
+      operationId: logout
+      security: []
+      responses:
+        '200':
+          description: Session cleared; cookie expired.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: "evan-proxy-session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=-1"
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+
+  /api/users:
+    get:
+      tags: [users]
+      summary: List proxy users
+      operationId: listUsers
+      responses:
+        '200':
+          description: All proxy users with their current configuration and status.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UserInfo' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [users]
+      summary: Create a proxy user
+      description: Creates a user and auto-assigns a dedicated proxy port from the configured range.
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '201':
+          description: User created and its port listener started.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: User already exists, or no proxy port is available.
+          content:
+            text/plain:
+              schema: { type: string }
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [users]
+      summary: Delete a proxy user
+      operationId: deleteUser
+      parameters:
+        - name: username
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: User deleted and its port listener stopped.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/users/password:
+    put:
+      tags: [users]
+      summary: Change a user's password
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credentials'
+      responses:
+        '200': { description: Password changed. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/users/port:
+    put:
+      tags: [users]
+      summary: Set a user's dedicated proxy port
+      description: A port of `0` unassigns the user's port. Non-zero ports must fall inside the configured user-port range and not collide with another user.
+      operationId: setPort
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, port]
+              properties:
+                username: { type: string }
+                port:
+                  type: integer
+                  description: Proxy port, or 0 to unassign.
+      responses:
+        '200': { description: Port updated. }
+        '400':
+          description: Bad request, or port outside the allowed range.
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Port already assigned to another user.
+          content:
+            text/plain:
+              schema: { type: string }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/users/enabled:
+    put:
+      tags: [users]
+      summary: Enable or disable a user's proxy access
+      operationId: setEnabled
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, enabled]
+              properties:
+                username: { type: string }
+                enabled: { type: boolean }
+      responses:
+        '200': { description: Enabled state updated; port listener started or stopped accordingly. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/users/dns:
+    put:
+      tags: [dns]
+      summary: Set a user's DNS resolver
+      description: |
+        Sets the per-user upstream DNS resolver. An empty `dns_server` clears the
+        override and reverts the user to the default resolver. When `dns_server`
+        is set, `dns_protocol` must be one of `plain`, `tls`, `https`. The server
+        normalizes the address (adds `:53`/`:853` or an `https://` scheme when omitted).
+      operationId: setDNS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DNSConfig'
+      responses:
+        '200': { description: DNS configuration updated. }
+        '400':
+          description: Bad request, or invalid `dns_protocol`.
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/users/dns/test:
+    post:
+      tags: [dns]
+      summary: Test a DNS resolver
+      description: |
+        Resolves `google.com` through the given resolver to verify it works.
+        Blocks up to ~5s, so clients should set a generous request deadline.
+        Always returns 200 with an `ok` flag; failures are reported in the body,
+        not the status code.
+      operationId: testDNS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dns_server, dns_protocol]
+              properties:
+                dns_server: { type: string }
+                dns_protocol:
+                  type: string
+                  enum: [plain, tls, https]
+      responses:
+        '200':
+          description: Test result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DNSTestResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/users/downtime:
+    put:
+      tags: [downtime]
+      summary: Set a user's downtime schedule
+      description: |
+        Replaces the user's weekly downtime schedule. An empty or omitted
+        schedule clears all downtime. Keys are day-of-week `"0"`–`"6"`
+        (Sunday = 0). A window whose `start` is later than its `end` spans
+        overnight into the next day.
+      operationId: setDowntimeSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username: { type: string }
+                downtime_schedule: { $ref: '#/components/schemas/DowntimeSchedule' }
+      responses:
+        '200': { description: Schedule updated. }
+        '400':
+          description: Bad request, or invalid schedule.
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/users/downtime-override:
+    put:
+      tags: [downtime]
+      summary: Set or clear a temporary downtime override
+      description: |
+        Suspends the active downtime window for a fixed duration without changing
+        the schedule. `duration_minutes` of `0` (or less) clears any active
+        override. Setting an override immediately starts the user's port listener.
+      operationId: setDowntimeOverride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, duration_minutes]
+              properties:
+                username: { type: string }
+                duration_minutes:
+                  type: integer
+                  description: Minutes to suspend downtime; 0 or less clears the override.
+      responses:
+        '200': { description: Override set or cleared. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/stats/top-sites:
+    get:
+      tags: [stats]
+      summary: Top requested hosts over the last hour
+      operationId: getTopSites
+      responses:
+        '200':
+          description: Up to 10 hosts by request count.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HostCount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/stats/top-blocked:
+    get:
+      tags: [stats]
+      summary: Top DNS-blocked hosts over the last hour
+      operationId: getTopBlocked
+      responses:
+        '200':
+          description: Up to 10 blocked hosts by count.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HostCount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/stats/traffic:
+    get:
+      tags: [stats]
+      summary: Per-minute traffic buckets
+      operationId: getTraffic
+      responses:
+        '200':
+          description: 60 one-minute buckets of request count and bytes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TrafficBucket' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/logs:
+    get:
+      tags: [stats]
+      summary: Live log stream (Server-Sent Events)
+      description: |
+        A `text/event-stream` of proxy log events. Each SSE message is
+        `data: <json>\n\n` where `<json>` is a `LogEntry`. The stream stays open
+        until the client disconnects. iOS clients can consume it via
+        `URLSession.bytes` and a small SSE line reader.
+      operationId: streamLogs
+      responses:
+        '200':
+          description: An open SSE stream of LogEntry events.
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/LogEntry'
+                description: |
+                  Delivered as SSE frames (`data: <json>\n\n`); each frame's
+                  `data:` payload is a JSON-encoded LogEntry.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/version:
+    get:
+      tags: [system]
+      summary: Server version
+      operationId: getVersion
+      security: []
+      responses:
+        '200':
+          description: The running server version.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version: { type: string }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: evan-proxy-session
+
+  responses:
+    BadRequest:
+      description: Malformed request.
+      content:
+        text/plain:
+          schema: { type: string }
+    Unauthorized:
+      description: Missing or invalid session.
+      content:
+        text/plain:
+          schema: { type: string }
+    NotFound:
+      description: User not found.
+      content:
+        text/plain:
+          schema: { type: string }
+    MethodNotAllowed:
+      description: HTTP method not allowed for this endpoint.
+    InternalError:
+      description: Internal server error.
+      content:
+        text/plain:
+          schema: { type: string }
+
+  schemas:
+    Credentials:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+
+    DNSConfig:
+      type: object
+      required: [username]
+      properties:
+        username: { type: string }
+        dns_server:
+          type: string
+          description: Resolver address; empty clears the override.
+        dns_protocol:
+          type: string
+          description: Required when dns_server is set.
+          enum: ["", plain, tls, https]
+
+    DNSTestResult:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        addresses:
+          type: array
+          items: { type: string }
+        error: { type: string }
+
+    DowntimeWindow:
+      type: object
+      required: [start, end]
+      properties:
+        start:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: '24h "HH:MM".'
+          examples: ["22:00"]
+        end:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: '24h "HH:MM". Earlier than start means the window spans overnight.'
+          examples: ["06:00"]
+
+    DowntimeSchedule:
+      type: object
+      description: |
+        Map of day-of-week ("0"=Sunday … "6"=Saturday) to that day's downtime
+        windows. Days with no downtime are omitted.
+      additionalProperties:
+        type: array
+        items: { $ref: '#/components/schemas/DowntimeWindow' }
+      examples:
+        - "1": [{ start: "22:00", end: "06:00" }]
+          "5": [{ start: "23:00", end: "07:00" }]
+
+    UserInfo:
+      type: object
+      required: [username, created_at, dns_server, dns_protocol, port, enabled]
+      properties:
+        username: { type: string }
+        created_at:
+          type: string
+          description: Creation timestamp (RFC3339).
+        dns_server: { type: string }
+        dns_protocol:
+          type: string
+          enum: ["", plain, tls, https]
+        port:
+          type: integer
+          description: Dedicated proxy port, or 0 if unassigned.
+        enabled: { type: boolean }
+        downtime_schedule: { $ref: '#/components/schemas/DowntimeSchedule' }
+        downtime_override_until:
+          type: string
+          description: RFC3339 time until which downtime is suspended; absent if no override.
+
+    HostCount:
+      type: object
+      required: [host, count]
+      properties:
+        host: { type: string }
+        count: { type: integer }
+
+    TrafficBucket:
+      type: object
+      required: [t, reqs, br, bw]
+      properties:
+        t:
+          type: integer
+          format: int64
+          description: Bucket start time (Unix epoch seconds).
+        reqs:
+          type: integer
+          description: Requests in the bucket.
+        br:
+          type: integer
+          format: int64
+          description: Bytes read (from clients).
+        bw:
+          type: integer
+          format: int64
+          description: Bytes written / downloaded from the internet.
+
+    LogEntry:
+      type: object
+      required: [ts, status]
+      properties:
+        ts:
+          type: string
+          format: date-time
+        event:
+          type: string
+          description: '"open", "close", "dns-block", "dns-err", or "" for a normal request.'
+        client_ip: { type: string }
+        method: { type: string }
+        host: { type: string }
+        uri: { type: string }
+        user: { type: string }
+        error: { type: string }
+        status: { type: integer }
+        duration_ms:
+          type: integer
+          format: int64
+        bytes_read:
+          type: integer
+          format: int64
+        bytes_written:
+          type: integer
+          format: int64

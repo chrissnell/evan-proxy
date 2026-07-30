@@ -4,3 +4,5 @@ scratch/
 CLAUDE.md
 .claude/
 .DS_Store
+ios/.build/
+ios/.swiftpm/
