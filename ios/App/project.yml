@@ -19,6 +19,8 @@ targets:
     sources: [Sources]
     dependencies:
       - package: EvanProxy
+      - package: swift-openapi-runtime
+        product: OpenAPIRuntime
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.evanproxy.app
