@@ -34,6 +34,7 @@ final class DashboardModel {
     init(api: StatsAPI) { self.api = api }
 
     func start() {
+        stop()  // idempotent: don't stack pollers if the view re-appears
         // Poll like the web UI: stats every 5s, traffic every 10s.
         statsTask = Task {
             while !Task.isCancelled {

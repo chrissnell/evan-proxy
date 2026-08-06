@@ -7,6 +7,7 @@ struct ScheduleEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var schedule: [String: [Components.Schemas.DowntimeWindow]] = [:]
     @State private var editing: EditRef?
+    @State private var error: String?
 
     private let dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
@@ -15,10 +16,14 @@ struct ScheduleEditorView: View {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader(title: "weekly schedule")
                 ForEach(0..<7, id: \.self) { d in dayRow(d) }
+                if let e = error { Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger) }
                 HStack {
                     PillButton(title: "copy Sun → all") { copySundayToAll() }
                     PillButton(title: "save", color: Palette.accent, filled: true) {
-                        Task { try? await api.setDowntime(user.username, cleaned()); await onChange(); dismiss() }
+                        Task {
+                            do { try await api.setDowntime(user.username, cleaned()); await onChange(); dismiss() }
+                            catch { self.error = "save failed" }
+                        }
                     }
                 }.padding(.top, 8)
             }.padding(12)

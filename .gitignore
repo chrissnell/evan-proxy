@@ -7,3 +7,4 @@ CLAUDE.md
 ios/.build/
 ios/.swiftpm/
 ios/App/EvanProxyApp.xcodeproj/
+ios/App/Generated/

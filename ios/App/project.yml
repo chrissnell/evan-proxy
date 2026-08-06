@@ -21,11 +21,16 @@ targets:
       - package: EvanProxy
       - package: swift-openapi-runtime
         product: OpenAPIRuntime
+    info:
+      path: Generated/Info.plist
+      properties:
+        UILaunchScreen: {}
+        # Home-LAN admin app: the server is typically plain http on the local network.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.evanproxy.app
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         CODE_SIGN_STYLE: Automatic
   EvanProxyAppTests:
     type: bundle.unit-test

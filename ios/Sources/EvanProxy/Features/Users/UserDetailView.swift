@@ -6,14 +6,19 @@ struct UserDetailView: View {
     let onChange: () async -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingDelete = false
+    @State private var error: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "access")
                 Box {
-                    Toggle(isOn: .constant(user.enabled)) { Text("proxy enabled").font(Typography.mono(14)) }
-                        .tint(Palette.accent)
+                    HStack {
+                        Text("proxy status").font(Typography.mono(14)).foregroundStyle(Palette.fg)
+                        Spacer()
+                        StatusChip(text: user.enabled ? "enabled" : "disabled",
+                                   color: user.enabled ? Palette.accent : Palette.danger)
+                    }
                 }
                 SectionHeader(title: "configuration")
                 Box {
@@ -25,9 +30,16 @@ struct UserDetailView: View {
                         NavigationLink { PasswordEditor(user: user, api: api) } label: { row("password", "••••••••") }
                     }
                 }
+                if let e = error {
+                    Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger)
+                }
                 PillButton(title: confirmingDelete ? "confirm delete" : "delete user", color: Palette.danger) {
-                    if confirmingDelete { Task { try? await api.deleteUser(user.username); await onChange(); dismiss() } }
-                    else { confirmingDelete = true }
+                    if confirmingDelete {
+                        Task {
+                            do { try await api.deleteUser(user.username); await onChange(); dismiss() }
+                            catch { self.error = "delete failed"; confirmingDelete = false }
+                        }
+                    } else { confirmingDelete = true }
                 }.padding(.top, 8)
             }.padding(12)
         }
@@ -46,6 +58,7 @@ struct PortEditor: View {
     let onChange: () async -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var port = ""
+    @State private var error: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "port")
@@ -53,9 +66,13 @@ struct PortEditor: View {
                 TextField("", text: $port).keyboardType(.numberPad).font(Typography.mono(14))
                     .padding(8).overlay(RoundedRectangle(cornerRadius: 2).stroke(Palette.border))
             }
+            if let e = error { Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger) }
             PillButton(title: "save", color: Palette.accent, filled: true) {
                 guard let p = Int(port) else { return }
-                Task { try? await api.setPort(user.username, p); await onChange(); dismiss() }
+                Task {
+                    do { try await api.setPort(user.username, p); await onChange(); dismiss() }
+                    catch { self.error = "save failed (port in use?)" }
+                }
             }
         }
         .padding(12).frame(maxHeight: .infinity, alignment: .top)
@@ -72,6 +89,7 @@ struct DNSEditor: View {
     @State private var server = ""
     @State private var proto = "plain"
     @State private var testResult: String?
+    @State private var error: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "dns override")
@@ -90,14 +108,17 @@ struct DNSEditor: View {
                     }
                 }
             }
+            if let e = error { Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger) }
             HStack(spacing: 6) {
                 PillButton(title: "test") {
                     Task { testResult = ((try? await api.testDNS(server: server, proto: proto)) == true) ? "ok" : "failed" }
                 }
                 PillButton(title: "save", color: Palette.accent, filled: true) {
                     Task {
-                        try? await api.setDNS(user.username, server: server, proto: server.isEmpty ? "" : proto)
-                        await onChange(); dismiss()
+                        do {
+                            try await api.setDNS(user.username, server: server, proto: server.isEmpty ? "" : proto)
+                            await onChange(); dismiss()
+                        } catch { self.error = "save failed" }
                     }
                 }
             }
@@ -113,6 +134,7 @@ struct PasswordEditor: View {
     let api: UserEditsAPI
     @Environment(\.dismiss) private var dismiss
     @State private var password = ""
+    @State private var error: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title: "new password")
@@ -120,9 +142,13 @@ struct PasswordEditor: View {
                 SecureField("", text: $password).font(Typography.mono(14))
                     .padding(8).overlay(RoundedRectangle(cornerRadius: 2).stroke(Palette.border))
             }
+            if let e = error { Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger) }
             PillButton(title: "save", color: Palette.accent, filled: true) {
                 guard !password.isEmpty else { return }
-                Task { try? await api.changePassword(user.username, password); dismiss() }
+                Task {
+                    do { try await api.changePassword(user.username, password); dismiss() }
+                    catch { self.error = "save failed" }
+                }
             }
         }
         .padding(12).frame(maxHeight: .infinity, alignment: .top)

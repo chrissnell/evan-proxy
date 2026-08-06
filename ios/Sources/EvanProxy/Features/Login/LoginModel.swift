@@ -10,6 +10,7 @@ final class LoginModel {
     func submit() async {
         error = nil; busy = true; defer { busy = false }
         do { try await auth.login(username: username, password: password) }
-        catch { self.error = "invalid credentials" }
+        catch AuthError.invalidCredentials { self.error = "invalid credentials" }
+        catch { self.error = "connection failed — check server url" }
     }
 }

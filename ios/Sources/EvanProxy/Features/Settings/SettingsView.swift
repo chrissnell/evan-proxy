@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     let auth: AuthStore
+    var client: Client? = nil
     @State private var urlString = ServerConfig.baseURL?.absoluteString ?? ""
     var body: some View {
         ScrollView {
@@ -20,7 +21,15 @@ struct SettingsView: View {
                         }
                     }
                 }
-                PillButton(title: "logout", color: Palette.danger) { auth.logout() }
+                PillButton(title: "logout", color: Palette.danger) {
+                    Task {
+                        // Best-effort server-side session invalidation, then clear local state.
+                        _ = try? await client?.logout()
+                        APIClientFactory.session.configuration.httpCookieStorage?
+                            .removeCookies(since: .distantPast)
+                        auth.logout()
+                    }
+                }
             }.padding(12)
         }.background(Palette.bg).navigationTitle("settings")
     }

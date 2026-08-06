@@ -29,18 +29,30 @@ public struct RootView: View {
 }
 
 struct MainTabs: View {
-    let client: Client; let auth: AuthStore
+    let client: Client
+    let auth: AuthStore
+    @State private var users: UsersModel
+
+    init(client: Client, auth: AuthStore) {
+        self.client = client
+        self.auth = auth
+        _users = State(initialValue: UsersModel(api: LiveUsersAPI(client: client)))
+    }
+
     var body: some View {
         TabView {
             DashboardView(model: .init(api: LiveStatsAPI(client: client)))
                 .tabItem { Text("dashboard") }
-            UsersView(model: .init(api: LiveUsersAPI(client: client)),
-                      makeDetail: { UserDetailView(user: $0, api: LiveUsersAPI(client: client), onChange: {}) },
-                      makeSchedule: { ScheduleEditorView(user: $0, api: LiveUsersAPI(client: client), onChange: {}) })
+            UsersView(model: users,
+                      makeDetail: { UserDetailView(user: $0, api: LiveUsersAPI(client: client),
+                                                   onChange: { await users.load() }) },
+                      makeSchedule: { ScheduleEditorView(user: $0, api: LiveUsersAPI(client: client),
+                                                         onChange: { await users.load() }) })
                 .tabItem { Text("users") }
-            LogsView(model: .init(stream: LogStream(baseURL: ServerConfig.baseURL!)))
+            LogsView(model: .init(stream: LogStream(baseURL: ServerConfig.baseURL!,
+                                                    reauth: { try? await auth.reauthenticate() })))
                 .tabItem { Text("logs") }
-            NavigationStack { SettingsView(auth: auth) }.tabItem { Text("settings") }
+            NavigationStack { SettingsView(auth: auth, client: client) }.tabItem { Text("settings") }
         }
         .tint(Palette.accent)
     }
