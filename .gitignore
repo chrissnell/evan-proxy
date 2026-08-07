@@ -4,3 +4,7 @@ scratch/
 CLAUDE.md
 .claude/
 .DS_Store
+ios/.build/
+ios/.swiftpm/
+ios/App/EvanProxyApp.xcodeproj/
+ios/App/Generated/

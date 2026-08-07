@@ -1,0 +1,60 @@
+name: EvanProxyApp
+options:
+  bundleIdPrefix: com.evanproxy
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  EvanProxy:
+    path: ..
+  swift-openapi-runtime:
+    url: https://github.com/apple/swift-openapi-runtime
+    from: 1.6.0
+  swift-http-types:
+    url: https://github.com/apple/swift-http-types
+    from: 1.0.0
+targets:
+  EvanProxyApp:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: EvanProxy
+      - package: swift-openapi-runtime
+        product: OpenAPIRuntime
+    info:
+      path: Generated/Info.plist
+      properties:
+        UILaunchScreen: {}
+        # Home-LAN admin app: the server is typically plain http on the local network.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.evanproxy.app
+        CODE_SIGN_STYLE: Automatic
+  EvanProxyAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ../Tests/EvanProxyTests
+    dependencies:
+      - target: EvanProxyApp
+      - package: EvanProxy
+      - package: swift-openapi-runtime
+        product: OpenAPIRuntime
+      - package: swift-http-types
+        product: HTTPTypes
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  EvanProxyApp:
+    build:
+      targets:
+        EvanProxyApp: all
+        EvanProxyAppTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [EvanProxyAppTests]
