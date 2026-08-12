@@ -55,8 +55,8 @@ struct TrafficChart: View {
                 if let s = selected {
                     RuleMark(x: .value("time", s.time))
                         .foregroundStyle(Palette.fgMuted.opacity(0.5))
-                        .annotation(position: .top,
-                                    overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                        .annotation(position: .top, spacing: 0,
+                                    overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
                             popup(s)
                         }
                     PointMark(x: .value("time", s.time), y: .value("value", s.value))
