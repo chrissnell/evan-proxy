@@ -10,7 +10,7 @@ struct DashboardView: View {
                     .font(Typography.mono(22, weight: .bold))
                     .foregroundStyle(Palette.fg)
                 SectionHeader(title: "bandwidth · 1h")
-                Box { TrafficChart(buckets: model.buckets, value: { Int($0.bw) }) }
+                Box { TrafficChart(buckets: model.buckets, value: { Int($0.bw) }, format: ByteFormat.string) }
                 SectionHeader(title: "requests · 1h")
                 Box { TrafficChart(buckets: model.buckets, value: { Int($0.reqs) }) }
                 SectionHeader(title: "top sites · 24h")
