@@ -21,13 +21,16 @@ struct SettingsView: View {
                         }
                     }
                 }
-                PillButton(title: "logout", color: Palette.danger) {
-                    Task {
-                        // Best-effort server-side session invalidation, then clear local state.
-                        _ = try? await client?.logout()
-                        APIClientFactory.session.configuration.httpCookieStorage?
-                            .removeCookies(since: .distantPast)
-                        auth.logout()
+                SectionHeader(title: "session")
+                Box {
+                    PillButton(title: "logout", color: Palette.danger) {
+                        Task {
+                            // Best-effort server-side session invalidation, then clear local state.
+                            _ = try? await client?.logout()
+                            APIClientFactory.session.configuration.httpCookieStorage?
+                                .removeCookies(since: .distantPast)
+                            auth.logout()
+                        }
                     }
                 }
             }.padding(12)

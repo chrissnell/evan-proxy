@@ -42,17 +42,18 @@ struct MainTabs: View {
     var body: some View {
         TabView {
             DashboardView(model: .init(api: LiveStatsAPI(client: client)))
-                .tabItem { Text("dashboard") }
+                .tabItem { Label("dashboard", systemImage: "chart.bar.fill") }
             UsersView(model: users,
                       makeDetail: { UserDetailView(user: $0, api: LiveUsersAPI(client: client),
                                                    onChange: { await users.load() }) },
                       makeSchedule: { ScheduleEditorView(user: $0, api: LiveUsersAPI(client: client),
                                                          onChange: { await users.load() }) })
-                .tabItem { Text("users") }
+                .tabItem { Label("users", systemImage: "person.2.fill") }
             LogsView(model: .init(stream: LogStream(baseURL: ServerConfig.baseURL!,
                                                     reauth: { try? await auth.reauthenticate() })))
-                .tabItem { Text("logs") }
-            NavigationStack { SettingsView(auth: auth, client: client) }.tabItem { Text("settings") }
+                .tabItem { Label("logs", systemImage: "terminal.fill") }
+            NavigationStack { SettingsView(auth: auth, client: client) }
+                .tabItem { Label("settings", systemImage: "gearshape.fill") }
         }
         .tint(Palette.accent)
     }
