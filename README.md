@@ -37,7 +37,7 @@ To make this work, follow this plan:
 - DNS-over-TLS (DoT) and DNS-over-HTTPS (DoH) support
 - DNS-level block detection (returns 523 for DNS-blocked domains)
 - Downtime schedules — set per-user internet access windows by day of week, with support for multiple windows per day and overnight spans; temporary overrides let you suspend downtime for 15 minutes to 12 hours without changing the schedule
-- Prometheus metrics endpoint (`/metrics`)
+- Prometheus metrics on a dedicated internal listener (kept off the public admin port)
 
 ## Configuration
 
@@ -62,6 +62,8 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 |----------|---------|-------------|
 | `PROXY_DB_PATH` | `/data/evan-proxy/users.db` | Path to SQLite user database |
 | `ADMIN_LISTEN` | `:9090` | Admin interface listen address |
+| `METRICS_LISTEN` | `127.0.0.1:9091` | Dedicated Prometheus metrics listen address. Empty string mounts `/metrics` on the admin port instead (legacy). |
+| `METRICS_USER_LABEL` | `false` | When `true`, include a per-user label on `evanproxy_requests_total`. This is PII (usernames) — leave off unless you accept exposing usernames to Prometheus. |
 | `DNS_SERVER` | | Custom DNS resolver (e.g. `1.1.1.1:53`), empty uses system default |
 | `DNS_PROTOCOL` | `plain` | DNS protocol: `plain`, `tls` (DoT), or `https` (DoH) |
 | `USER_PORT_MIN` | `8081` | First per-user dedicated proxy port |
@@ -131,6 +133,16 @@ timezone: "America/Denver"   # IANA timezone, e.g. America/Los_Angeles, US/Easte
 
 Without this, the container defaults to UTC and downtime windows won't match your local time.
 
+## Metrics
+
+Prometheus metrics are served at `/metrics` on a **dedicated internal listener**, separate from the admin port. By default that listener binds `127.0.0.1:9091` (`METRICS_LISTEN`), so metrics are never reachable on the public admin host. Setting `METRICS_LISTEN=""` falls back to mounting `/metrics` on the admin port (legacy behaviour).
+
+The per-user label on `evanproxy_requests_total` is **off by default** because usernames are PII. The metric is labelled only by `method` and `status_code` unless you set `METRICS_USER_LABEL=true`.
+
+The unauthenticated `net/http/pprof` debug endpoints (`/debug/pprof/*`) share this internal listener too, so process profiles are never exposed on the public admin host. With the legacy `METRICS_LISTEN=""` they fall back to the admin port alongside `/metrics`.
+
+In Kubernetes the pod binds the metrics listener on `0.0.0.0:9091` and exposes it **only** through an internal `ClusterIP` Service (`<release>-evan-proxy-metrics`) — never the public `LoadBalancer`. A NetworkPolicy rule restricts scraping to the namespace named by `metrics.scrapeNamespace` (default `monitoring`). Point Prometheus at that ClusterIP Service (e.g. a `ServiceMonitor` targeting the `metrics` port) rather than the proxy's public IP.
+
 ## Building
 
 ```bash
@@ -173,6 +185,10 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `proxy.dnsProtocol` | string | `""` | DNS protocol: `plain`, `tls`, or `https` (empty = plain) |
 | `proxy.userPortMin` | int | `8080` | First per-user dedicated proxy port |
 | `proxy.userPortMax` | int | `8090` | Last per-user dedicated proxy port |
+| `metrics.listen` | string | `"0.0.0.0:9091"` | In-pod metrics listen address (bind `0.0.0.0` so the ClusterIP Service can reach it) |
+| `metrics.port` | int | `9091` | Port for the internal metrics ClusterIP Service |
+| `metrics.userLabel` | bool | `false` | Include the per-user (PII) label on request metrics |
+| `metrics.scrapeNamespace` | string | `"monitoring"` | Namespace allowed to scrape metrics by the NetworkPolicy |
 | `admin.listen` | string | `":9090"` | Admin interface listen address |
 | `admin.user` | string | `"admin"` | Admin username |
 | `admin.passwordHash` | string | `"$2y$10$CHANGEME"` | Admin password as bcrypt hash |

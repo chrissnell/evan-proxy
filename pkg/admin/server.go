@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"strconv"
 	"time"
 
@@ -34,7 +35,7 @@ type Options struct {
 	TrustedProxies []*net.IPNet
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, opts Options) *Server {
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, opts Options, mountDiagnostics bool) *Server {
 	sessions := NewSessionStore(24*time.Hour, lg)
 	a := &api{
 		auth:            adminAuth,
@@ -77,8 +78,13 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 		fmt.Fprintf(w, `{"version":%q}`, version)
 	})
 
-	// Prometheus metrics (no auth — standard for scraping)
-	mux.Handle("/metrics", m.Handler())
+	// Prometheus /metrics is mounted on the admin port only when no dedicated
+	// internal metrics listener is configured (mountDiagnostics). Otherwise it is
+	// served on the internal listener (see cmd/evan-proxy/main.go). pprof is never
+	// mounted on the admin mux — it is opt-in on its own loopback listener.
+	if mountDiagnostics {
+		mux.Handle("/metrics", m.Handler())
+	}
 
 	// Pages
 	mux.HandleFunc("/login", serveFile("static/login.html"))
@@ -89,6 +95,17 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+// RegisterPprof mounts the net/http/pprof debug endpoints on mux. These are
+// unauthenticated and expose process internals (argv, heap/CPU profiles), so
+// they belong on an internal-only listener — never the public admin host.
+func RegisterPprof(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 }
 
 func serveFile(name string) http.HandlerFunc {

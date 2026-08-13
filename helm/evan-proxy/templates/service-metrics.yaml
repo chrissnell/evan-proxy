@@ -1,0 +1,21 @@
+{{- /*
+Internal-only Service for Prometheus metrics. ClusterIP (never a LoadBalancer),
+so /metrics is reachable in-cluster for scraping but never exposed on the public
+admin host. Access is further restricted by the NetworkPolicy to the monitoring
+namespace.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "evan-proxy.fullname" . }}-metrics
+  labels:
+    {{- include "evan-proxy.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "evan-proxy.selectorLabels" . | nindent 4 }}

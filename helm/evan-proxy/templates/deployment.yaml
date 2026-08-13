@@ -16,9 +16,10 @@ spec:
       annotations:
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
-        prometheus.io/path: "/metrics"
+        # Metrics are NOT scraped from the public admin port. They are served on
+        # a dedicated internal listener reached via the metrics ClusterIP Service
+        # (see service-metrics.yaml), scoped by NetworkPolicy to the monitoring
+        # namespace.
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -67,6 +68,9 @@ spec:
           ports:
             - name: admin
               containerPort: 9090
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
               protocol: TCP
             {{- $min := .Values.proxy.userPortMin | int }}
             {{- $max := .Values.proxy.userPortMax | int }}

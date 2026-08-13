@@ -13,6 +13,9 @@ data:
   {{- if .Values.admin.trustedProxyCIDRs }}
   TRUSTED_PROXY_CIDRS: {{ join "," .Values.admin.trustedProxyCIDRs | quote }}
   {{- end }}
+  # Metrics — internal listener, never on the public admin port
+  METRICS_LISTEN: {{ .Values.metrics.listen | quote }}
+  METRICS_USER_LABEL: {{ .Values.metrics.userLabel | default false | quote }}
   # Console logging
   LOG_FORMAT: {{ .Values.logging.console.format | quote }}
   # Verbose per-request header logging (plain-HTTP forward path only)

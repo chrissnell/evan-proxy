@@ -16,6 +16,10 @@ type Config struct {
 	// Admin listener
 	AdminListen string
 
+	// Metrics
+	MetricsListen    string // "" = mount /metrics on the admin port (legacy); else its own listener addr
+	MetricsUserLabel bool   // include the per-user label (PII) on request metrics — default false
+
 	// Admin credentials
 	AdminUser     string
 	AdminPassword string // bcrypt hash
@@ -81,6 +85,8 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		ProxyDBPath:         envOr("PROXY_DB_PATH", "/data/evan-proxy/users.db"),
 		AdminListen:         envOr("ADMIN_LISTEN", ":9090"),
+		MetricsListen:       envOr("METRICS_LISTEN", "127.0.0.1:9091"),
+		MetricsUserLabel:    envBool("METRICS_USER_LABEL", false),
 		AdminUser:           os.Getenv("ADMIN_USER"),
 		AdminPassword:       os.Getenv("ADMIN_PASSWORD"),
 		DNSServer:           os.Getenv("DNS_SERVER"),

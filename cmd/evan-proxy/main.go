@@ -5,7 +5,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -66,7 +65,7 @@ func main() {
 	collector := stats.NewCollector()
 	logger.AddObserver(collector.Observe)
 
-	m := metrics.New()
+	m := metrics.New(metrics.Options{UserLabel: cfg.MetricsUserLabel})
 	logger.AddObserver(m.Observe)
 
 	counter := stats.NewTrafficCounter(collector)
@@ -81,12 +80,16 @@ func main() {
 			trustedProxies = append(trustedProxies, n)
 		}
 	}
-	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version, admin.Options{
-		LoginRateLimit: cfg.AdminLoginRateLimit,
-		LoginWindow:    cfg.AdminLoginWindow,
-		LoginGlobalMax: cfg.AdminLoginGlobalMax,
-		TrustedProxies: trustedProxies,
-	})
+	// /metrics is mounted on the admin port only when no dedicated internal
+	// metrics listener is configured.
+	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version,
+		admin.Options{
+			LoginRateLimit: cfg.AdminLoginRateLimit,
+			LoginWindow:    cfg.AdminLoginWindow,
+			LoginGlobalMax: cfg.AdminLoginGlobalMax,
+			TrustedProxies: trustedProxies,
+		},
+		cfg.MetricsListen == "")
 
 	// Per-user dedicated port listeners
 	if err := proxyHandler.StartUserListeners(); err != nil {
@@ -109,8 +112,29 @@ func main() {
 		}
 	}()
 
+	// Internal metrics listener — serves /metrics off the public admin host.
+	// Bound to a private address by default (127.0.0.1:9091); in k8s it binds
+	// inside the pod and is reached only via a ClusterIP + NetworkPolicy.
+	var metricsSrv *http.Server
+	if cfg.MetricsListen != "" {
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", m.Handler())
+		metricsSrv = &http.Server{
+			Addr:        cfg.MetricsListen,
+			Handler:     metricsMux,
+			ReadTimeout: 10 * time.Second,
+			IdleTimeout: 120 * time.Second,
+		}
+		go func() {
+			logger.Infof("metrics", "listening on %s", cfg.MetricsListen)
+			if err := metricsSrv.ListenAndServe(); err != http.ErrServerClosed {
+				logger.Fatalf("metrics", "%v", err)
+			}
+		}()
+	}
+
 	// Optional pprof profiling on a separate loopback listener (never the public
-	// admin port). Reach it via `kubectl port-forward`.
+	// admin port, and off unless PPROF_ENABLED). Reach it via `kubectl port-forward`.
 	if cfg.PProfEnabled {
 		// Defense in depth: pprof is unauthenticated and leaks cmdline/heap
 		// dumps, so a non-loopback bind re-exposes exactly what this listener
@@ -119,11 +143,7 @@ func main() {
 			logger.Errorf("pprof", "PPROF_LISTEN %q is not loopback — unauthenticated profiling endpoints will be network-reachable; bind to 127.0.0.1 and use kubectl port-forward", cfg.PProfListen)
 		}
 		pmux := http.NewServeMux()
-		pmux.HandleFunc("/debug/pprof/", pprof.Index)
-		pmux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		pmux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		pmux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		pmux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		admin.RegisterPprof(pmux)
 		go func() {
 			logger.Infof("pprof", "listening on %s", cfg.PProfListen)
 			if err := http.ListenAndServe(cfg.PProfListen, pmux); err != nil {
@@ -145,6 +165,9 @@ func main() {
 	proxyHandler.ShutdownUserListeners(ctx)
 	proxyHandler.StopAuthCleanup()
 	adminSrv.Shutdown(ctx)
+	if metricsSrv != nil {
+		metricsSrv.Shutdown(ctx)
+	}
 	counter.Stop()
 	collector.Stop()
 	limiter.Stop()
