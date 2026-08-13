@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -32,6 +33,12 @@ type Config struct {
 	// Rate limiting
 	AuthFailRateLimit int
 	AuthFailWindow    time.Duration
+
+	// Admin login brute-force protection
+	AdminLoginRateLimit int           // per-IP failures allowed within the window
+	AdminLoginWindow    time.Duration // sliding window for per-IP failures
+	AdminLoginGlobalMax int           // global failure ceiling across all IPs in the window (0 = disabled)
+	TrustedProxyCIDRs   []string      // CIDRs whose X-Forwarded-For is trusted; empty = trust none
 
 	// Per-user dedicated proxy ports
 	UserPortMin int // first port in range (inclusive)
@@ -78,6 +85,10 @@ func Load() (*Config, error) {
 		HTTPTimeout:         envDuration("HTTP_TIMEOUT", 30*time.Second),
 		AuthFailRateLimit:   envInt("AUTH_FAIL_RATE_LIMIT", 5),
 		AuthFailWindow:      envDuration("AUTH_FAIL_WINDOW", 60*time.Second),
+		AdminLoginRateLimit: envInt("ADMIN_LOGIN_RATE_LIMIT", 5),
+		AdminLoginWindow:    envDuration("ADMIN_LOGIN_WINDOW", 15*time.Minute),
+		AdminLoginGlobalMax: envInt("ADMIN_LOGIN_GLOBAL_MAX", 100),
+		TrustedProxyCIDRs:   envCSV("TRUSTED_PROXY_CIDRS", nil),
 		UserPortMin:         envInt("USER_PORT_MIN", 8081),
 		UserPortMax:         envInt("USER_PORT_MAX", 8090),
 		LogFormat:           envOr("LOG_FORMAT", "human"),
@@ -133,6 +144,11 @@ func (c *Config) validate() error {
 	}
 	if c.PACEnabled && c.PACPath == "" {
 		return fmt.Errorf("PAC_PATH must not be empty when PAC_ENABLED is true")
+	}
+	for _, cidr := range c.TrustedProxyCIDRs {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("TRUSTED_PROXY_CIDRS entry %q is not a valid CIDR: %w", cidr, err)
+		}
 	}
 	return nil
 }
