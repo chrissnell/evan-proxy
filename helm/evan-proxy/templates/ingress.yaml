@@ -11,6 +11,10 @@ metadata:
   {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   rules:
     {{- range .Values.ingress.hosts }}
     - host: {{ .host | quote }}
@@ -21,7 +25,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "evan-proxy.fullname" $ }}
+                name: {{ include "evan-proxy.fullname" $ }}-admin
                 port:
                   number: {{ .servicePort }}
           {{- end }}

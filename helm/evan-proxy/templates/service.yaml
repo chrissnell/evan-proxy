@@ -14,10 +14,12 @@ spec:
   loadBalancerIP: {{ .Values.service.loadBalancerIP }}
   {{- end }}
   ports:
+    {{- if .Values.service.exposeAdmin }}
     - name: admin
       port: {{ .Values.service.adminPort }}
       targetPort: admin
       protocol: TCP
+    {{- end }}
     {{- $min := .Values.proxy.userPortMin | int }}
     {{- $max := .Values.proxy.userPortMax | int }}
     {{- range $p := untilStep $min (add1 $max | int) 1 }}

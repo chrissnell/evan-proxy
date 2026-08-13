@@ -23,7 +23,7 @@ var staticFS embed.FS
 
 // Server is the admin HTTP handler.
 type Server struct {
-	mux *http.ServeMux
+	handler http.Handler
 }
 
 // Options carries the login brute-force protection settings into the admin
@@ -35,7 +35,11 @@ type Options struct {
 	TrustedProxies []*net.IPNet
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, opts Options, mountDiagnostics bool) *Server {
+// NewServer builds the admin HTTP handler. mountDiagnostics mounts /metrics on
+// the admin port when no dedicated internal metrics listener is configured.
+// forceHTTPS sets the Secure flag on session cookies and emits HSTS — enable it
+// when TLS terminates in front (ingress) or in-process (autocert).
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, opts Options, mountDiagnostics bool, forceHTTPS bool) *Server {
 	sessions := NewSessionStore(24*time.Hour, lg)
 	a := &api{
 		auth:            adminAuth,
@@ -48,6 +52,7 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 		trustedProxies:  opts.TrustedProxies,
 		globalFails:     newGlobalCounter(opts.LoginGlobalMax, opts.LoginWindow),
 		loginRetryAfter: strconv.Itoa(int(opts.LoginWindow.Seconds())),
+		secureCookies:   forceHTTPS,
 	}
 
 	mux := http.NewServeMux()
@@ -90,11 +95,11 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 	mux.HandleFunc("/login", serveFile("static/login.html"))
 	mux.HandleFunc("/", a.requireSessionPage(serveFile("static/index.html")))
 
-	return &Server{mux: mux}
+	return &Server{handler: securityHeaders(mux, forceHTTPS)}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 // RegisterPprof mounts the net/http/pprof debug endpoints on mux. These are

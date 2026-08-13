@@ -214,5 +214,48 @@ func TestLoadInvalidAdminLoginWindow(t *testing.T) {
 	}
 }
 
+func TestLoadForceHTTPSDefault(t *testing.T) {
+	setEnv(t, validEnv())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ForceHTTPS {
+		t.Errorf("ForceHTTPS = true, want false by default")
+	}
+	if cfg.AutocertDir != "/data/evan-proxy/autocert" {
+		t.Errorf("AutocertDir = %q, want default cache dir", cfg.AutocertDir)
+	}
+}
+
+func TestLoadForceHTTPS(t *testing.T) {
+	env := validEnv()
+	env["FORCE_HTTPS"] = "true"
+	setEnv(t, env)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.ForceHTTPS {
+		t.Errorf("ForceHTTPS = false, want true")
+	}
+}
+
+func TestLoadAutocertImpliesForceHTTPS(t *testing.T) {
+	env := validEnv()
+	env["AUTOCERT_HOST"] = "proxy.example.com"
+	setEnv(t, env)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AutocertHost != "proxy.example.com" {
+		t.Errorf("AutocertHost = %q, want proxy.example.com", cfg.AutocertHost)
+	}
+	if !cfg.ForceHTTPS {
+		t.Errorf("ForceHTTPS = false, want true when AUTOCERT_HOST is set")
+	}
+}
+
 // Suppress unused import warning
 var _ = os.Getenv

@@ -5,5 +5,17 @@ Ports:  {{ .Values.proxy.userPortMin }}-{{ .Values.proxy.userPortMax }} (per-use
 
 To get the external IP:
   kubectl get svc {{ include "evan-proxy.fullname" . }}
+{{- if and (not .Values.service.exposeAdmin) (not .Values.ingress.enabled) }}
+
+WARNING: service.exposeAdmin is false and ingress is disabled, so the admin UI
+is not reachable from outside the cluster. Enable the ingress or reach it with:
+  kubectl port-forward svc/{{ include "evan-proxy.fullname" . }} {{ .Values.service.adminPort }}:{{ .Values.service.adminPort }}
+{{- end }}
+{{- if and .Values.ingress.enabled (not .Values.admin.forceHTTPS) }}
+
+WARNING: ingress is enabled but admin.forceHTTPS is false — session cookies will
+not carry the Secure flag. Set admin.forceHTTPS: true when terminating TLS at the
+ingress.
+{{- end }}
 
 Configure iOS devices with the proxy IP and the user's assigned port.

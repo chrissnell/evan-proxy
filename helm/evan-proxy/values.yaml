@@ -102,6 +102,11 @@ admin:
   # XFF is ignored and the immediate peer address is used — safe default that
   # prevents header-spoofed rate-limit evasion.
   trustedProxyCIDRs: []
+  # Set true when TLS terminates in front of the pod (ingress below, or an
+  # external LB). Sets the Secure flag on the session cookie and sends HSTS.
+  # Leave false only for plain-HTTP local access. Apple ATS (the iOS app)
+  # requires HTTPS, so any remote deployment must set this true.
+  forceHTTPS: false
 
 # Use an existing secret instead of creating one
 # Secret must contain: ADMIN_USER, ADMIN_PASSWORD
@@ -114,6 +119,11 @@ service:
   loadBalancerIP: ""
   annotations: {}
   adminPort: 9090
+  # Expose the admin port (9090) on this Service. The per-user proxy ports are
+  # always exposed (they are the product). For any internet-facing deployment,
+  # set this false and reach the admin UI through the TLS ingress below (or a
+  # private LB) instead of exposing plaintext admin on the public LoadBalancer.
+  exposeAdmin: true
 
 # Resources
 resources:
@@ -130,17 +140,28 @@ networkPolicy:
   # Allow CONNECT tunnels to reach any port (not just 80/443)
   allowAllEgress: true
 
-# Ingress (e.g. for admin UI)
+# Ingress for the admin UI. When enabled, a dedicated ClusterIP service
+# (<release>-admin) is created as the ingress backend, so the admin port need
+# not be exposed on the public LoadBalancer (set service.exposeAdmin: false).
+# Terminate TLS here and set admin.forceHTTPS: true.
 ingress:
   enabled: false
   className: ""
+  # cert-manager issues and renews the TLS cert automatically. Example:
   annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
   hosts:
     - host: proxy.example.com
       paths:
         - path: /
           pathType: ImplementationSpecific
           servicePort: 9090
+  # TLS termination at the ingress. cert-manager fills secretName from the
+  # annotation above; or supply a pre-created secret. Example:
+  tls: []
+    # - secretName: evan-proxy-tls
+    #   hosts:
+    #     - proxy.example.com
 
 # Timezone for downtime schedule evaluation (IANA format)
 # e.g. "America/Denver", "America/Los_Angeles", "US/Eastern"

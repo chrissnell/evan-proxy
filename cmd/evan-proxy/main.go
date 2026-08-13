@@ -20,6 +20,8 @@ import (
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
+
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // Version is set at build time via -ldflags.
@@ -71,7 +73,6 @@ func main() {
 	counter := stats.NewTrafficCounter(collector)
 	counter.AddObserver(m.ObserveLiveBytes)
 	proxyHandler := proxy.New(cfg, users, users, users, users, users, a, limiter, logger, counter, m)
-
 	// Parse trusted-proxy CIDRs for admin login client-IP extraction. The
 	// config layer already validated each entry, so ParseCIDR cannot fail here.
 	var trustedProxies []*net.IPNet
@@ -81,7 +82,7 @@ func main() {
 		}
 	}
 	// /metrics is mounted on the admin port only when no dedicated internal
-	// metrics listener is configured.
+	// metrics listener is configured. forceHTTPS enables the Secure cookie + HSTS.
 	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version,
 		admin.Options{
 			LoginRateLimit: cfg.AdminLoginRateLimit,
@@ -89,7 +90,8 @@ func main() {
 			LoginGlobalMax: cfg.AdminLoginGlobalMax,
 			TrustedProxies: trustedProxies,
 		},
-		cfg.MetricsListen == "")
+		cfg.MetricsListen == "",
+		cfg.ForceHTTPS)
 
 	// Per-user dedicated port listeners
 	if err := proxyHandler.StartUserListeners(); err != nil {
@@ -105,12 +107,49 @@ func main() {
 		IdleTimeout: 120 * time.Second,
 	}
 
-	go func() {
-		logger.Infof("admin", "listening on %s", cfg.AdminListen)
-		if err := adminSrv.ListenAndServe(); err != http.ErrServerClosed {
-			logger.Fatalf("admin", "%v", err)
+	if cfg.AutocertHost != "" {
+		// Terminate TLS in-process via Let's Encrypt (single-host deployments,
+		// e.g. Raspberry Pi). No manual cert files needed.
+		mgr := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(cfg.AutocertHost),
+			Cache:      autocert.DirCache(cfg.AutocertDir),
 		}
-	}()
+		adminSrv.TLSConfig = mgr.TLSConfig()
+		// Serve HTTPS on the standard port so it matches the :80 ACME handler's
+		// HTTP->HTTPS redirect (which targets :443) and what iOS/ATS expects.
+		// Binding :443 needs root or CAP_NET_BIND_SERVICE; NAT/port-forward
+		// setups can forward external 443 to this host instead.
+		adminSrv.Addr = ":443"
+
+		// :80 serves the ACME http-01 challenge and redirects everything else
+		// to HTTPS.
+		challengeSrv := &http.Server{Addr: ":80", Handler: mgr.HTTPHandler(nil)}
+		go func() {
+			if err := challengeSrv.ListenAndServe(); err != http.ErrServerClosed {
+				logger.Fatalf("admin", "acme http: %v", err)
+			}
+		}()
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			challengeSrv.Shutdown(ctx)
+		}()
+
+		go func() {
+			logger.Infof("admin", "listening with autocert TLS for %s on %s", cfg.AutocertHost, adminSrv.Addr)
+			if err := adminSrv.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
+				logger.Fatalf("admin", "tls: %v", err)
+			}
+		}()
+	} else {
+		go func() {
+			logger.Infof("admin", "listening on %s", cfg.AdminListen)
+			if err := adminSrv.ListenAndServe(); err != http.ErrServerClosed {
+				logger.Fatalf("admin", "%v", err)
+			}
+		}()
+	}
 
 	// Internal metrics listener — serves /metrics off the public admin host.
 	// Bound to a private address by default (127.0.0.1:9091); in k8s it binds
