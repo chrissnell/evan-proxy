@@ -6,6 +6,13 @@ metadata:
     {{- include "evan-proxy.labels" . | nindent 4 }}
 data:
   ADMIN_LISTEN: {{ .Values.admin.listen | quote }}
+  # Admin login brute-force protection
+  ADMIN_LOGIN_RATE_LIMIT: {{ .Values.admin.loginRateLimit | quote }}
+  ADMIN_LOGIN_WINDOW: {{ .Values.admin.loginWindow | quote }}
+  ADMIN_LOGIN_GLOBAL_MAX: {{ .Values.admin.loginGlobalMax | quote }}
+  {{- if .Values.admin.trustedProxyCIDRs }}
+  TRUSTED_PROXY_CIDRS: {{ join "," .Values.admin.trustedProxyCIDRs | quote }}
+  {{- end }}
   # Console logging
   LOG_FORMAT: {{ .Values.logging.console.format | quote }}
   # Verbose per-request header logging (plain-HTTP forward path only)

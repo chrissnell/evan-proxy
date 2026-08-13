@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"evan-proxy/pkg/auth"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/metrics"
+	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
 )
@@ -23,15 +25,27 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string) *Server {
+// Options carries the login brute-force protection settings into the admin
+// server. TrustedProxies is the parsed form of cfg.TrustedProxyCIDRs.
+type Options struct {
+	LoginRateLimit int
+	LoginWindow    time.Duration
+	LoginGlobalMax int
+	TrustedProxies []*net.IPNet
+}
+
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, opts Options) *Server {
 	sessions := NewSessionStore(24*time.Hour, lg)
 	a := &api{
-		auth:     adminAuth,
-		sessions: sessions,
-		stats:    collector,
-		users:    users,
-		ports:    ports,
-		logger:   lg,
+		auth:           adminAuth,
+		sessions:       sessions,
+		stats:          collector,
+		users:          users,
+		ports:          ports,
+		logger:         lg,
+		loginLimiter:   ratelimit.New(opts.LoginRateLimit, opts.LoginWindow),
+		trustedProxies: opts.TrustedProxies,
+		globalFails:    newGlobalCounter(opts.LoginGlobalMax, opts.LoginWindow),
 	}
 
 	mux := http.NewServeMux()

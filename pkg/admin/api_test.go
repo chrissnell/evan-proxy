@@ -11,9 +11,22 @@ import (
 	"testing"
 	"time"
 
+	"evan-proxy/pkg/auth"
 	"evan-proxy/pkg/logging"
+	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/userdb"
+
+	"golang.org/x/crypto/bcrypt"
 )
+
+func mustBcrypt(t *testing.T, pw string) string {
+	t.Helper()
+	h, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(h)
+}
 
 func setupAPI(t *testing.T) *api {
 	t.Helper()
@@ -31,9 +44,78 @@ func setupAPI(t *testing.T) *api {
 	sessions := NewSessionStore(1*time.Hour, lg)
 	t.Cleanup(func() { sessions.Stop() })
 
+	limiter := ratelimit.New(3, time.Minute)
+	t.Cleanup(func() { limiter.Stop() })
+
 	return &api{
-		sessions: sessions,
-		users:    users,
+		auth:         auth.NewAdminAuth("admin", mustBcrypt(t, "correct-horse")),
+		sessions:     sessions,
+		users:        users,
+		logger:       lg,
+		loginLimiter: limiter,
+		globalFails:  newGlobalCounter(100, time.Minute),
+	}
+}
+
+func TestHandleLogin_RateLimitsAfterFailures(t *testing.T) {
+	a := setupAPI(t)
+	body := `{"username":"admin","password":"wrong"}`
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(body))
+		req.RemoteAddr = "203.0.113.7:1111"
+		w := httptest.NewRecorder()
+		a.handleLogin(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: want 401, got %d", i, w.Code)
+		}
+	}
+	// 4th attempt (even with correct password) is blocked by the limiter.
+	req := httptest.NewRequest(http.MethodPost, "/api/login",
+		strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+	req.RemoteAddr = "203.0.113.7:1111"
+	w := httptest.NewRecorder()
+	a.handleLogin(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("want 429 after limit, got %d", w.Code)
+	}
+}
+
+func TestHandleLogin_FreshIPSucceeds(t *testing.T) {
+	a := setupAPI(t)
+	// Exhaust the limiter for one IP.
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/login",
+			strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		req.RemoteAddr = "203.0.113.7:1111"
+		a.handleLogin(httptest.NewRecorder(), req)
+	}
+	// A different IP with the correct password still logs in.
+	req := httptest.NewRequest(http.MethodPost, "/api/login",
+		strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+	req.RemoteAddr = "198.51.100.4:2222"
+	w := httptest.NewRecorder()
+	a.handleLogin(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("fresh IP want 200, got %d", w.Code)
+	}
+	if len(w.Result().Cookies()) == 0 {
+		t.Fatal("expected a session cookie to be set")
+	}
+}
+
+func TestHandleLogin_SuccessDoesNotCount(t *testing.T) {
+	a := setupAPI(t)
+	// Repeated successful logins from one IP must never trip the limiter,
+	// so the iOS reauth path stays functional.
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/login",
+			strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+		req.RemoteAddr = "203.0.113.8:3333"
+		w := httptest.NewRecorder()
+		a.handleLogin(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("attempt %d: want 200, got %d", i, w.Code)
+		}
 	}
 }
 
