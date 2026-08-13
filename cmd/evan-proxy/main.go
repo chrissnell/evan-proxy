@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -108,6 +109,29 @@ func main() {
 		}
 	}()
 
+	// Optional pprof profiling on a separate loopback listener (never the public
+	// admin port). Reach it via `kubectl port-forward`.
+	if cfg.PProfEnabled {
+		// Defense in depth: pprof is unauthenticated and leaks cmdline/heap
+		// dumps, so a non-loopback bind re-exposes exactly what this listener
+		// exists to keep off the public port. Warn loudly if so configured.
+		if !isLoopbackListen(cfg.PProfListen) {
+			logger.Errorf("pprof", "PPROF_LISTEN %q is not loopback — unauthenticated profiling endpoints will be network-reachable; bind to 127.0.0.1 and use kubectl port-forward", cfg.PProfListen)
+		}
+		pmux := http.NewServeMux()
+		pmux.HandleFunc("/debug/pprof/", pprof.Index)
+		pmux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		pmux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		pmux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		pmux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		go func() {
+			logger.Infof("pprof", "listening on %s", cfg.PProfListen)
+			if err := http.ListenAndServe(cfg.PProfListen, pmux); err != nil {
+				logger.Errorf("pprof", "%v", err)
+			}
+		}()
+	}
+
 	// Graceful shutdown
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -124,4 +148,21 @@ func main() {
 	counter.Stop()
 	collector.Stop()
 	limiter.Stop()
+}
+
+// isLoopbackListen reports whether a "host:port" listen address binds only the
+// loopback interface. A literal loopback IP (127.0.0.0/8, ::1) or the "localhost"
+// hostname qualifies; a bare/empty host, "0.0.0.0", "::", or any routable IP
+// does not. On a parse failure it returns false so the caller warns rather than
+// staying silent.
+func isLoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

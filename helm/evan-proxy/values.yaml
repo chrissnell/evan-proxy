@@ -55,6 +55,14 @@ pac:
   # (venmo.com, paypal.com, paypalobjects.com, braintreegateway.com, braintree-api.com).
   bypassDomains: []
 
+# Debug endpoints — opt-in pprof profiling.
+# Never served on the public admin port. When enabled, pprof binds a separate
+# loopback listener (`pprofListen`), reachable only from inside the pod via
+# `kubectl port-forward`. Leave disabled in normal operation.
+debug:
+  pprofEnabled: false
+  pprofListen: "127.0.0.1:6060"
+
 # Persistent storage for SQLite user database
 persistence:
   enabled: true
