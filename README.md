@@ -183,7 +183,7 @@ ingress:
 
 The per-user proxy ports (`userPortMin`–`userPortMax`) remain on the `LoadBalancer` service — they are the product and must stay reachable. Only the admin port moves behind the ingress.
 
-> **Note:** With this hardening in place, the admin port no longer serves `/metrics` or `/debug/pprof/*` — metrics move to an internal listener (`METRICS_LISTEN`) and pprof is opt-in on its own loopback listener (`PPROF_ENABLED`/`PPROF_LISTEN`). `/api/login` is also rate-limited per client IP. Per-device token auth for the iOS app is tracked separately; until it lands, treat the admin credentials as the single factor guarding this ingress and keep it on a trusted network or behind a VPN if you want defense in depth.
+> **Note:** With this hardening in place, the admin port no longer serves `/metrics` or `/debug/pprof/*` — metrics move to an internal listener (`METRICS_LISTEN`) and pprof is opt-in on its own loopback listener (`PPROF_ENABLED`/`PPROF_LISTEN`). `/api/login` is also rate-limited per client IP, and mobile devices authenticate with revocable per-device tokens (see "Device pairing" below) instead of the admin password.
 
 ### Recipe 2 — Built-in autocert (single host, e.g. Raspberry Pi)
 
@@ -198,6 +198,16 @@ export AUTOCERT_DIR=/data/evan-proxy/autocert   # persist across restarts
 ```
 
 With `AUTOCERT_HOST` set, HTTPS is served on the standard port `:443` (so it matches the ACME handler's HTTP→HTTPS redirect and what iOS/ATS expects) — `ADMIN_LISTEN` is not used in this mode. The host must be reachable from the internet on port `80` (ACME `http-01` challenge; also redirects to HTTPS) and `443`. Binding `:80`/`:443` requires root or the `CAP_NET_BIND_SERVICE` capability (`sudo setcap 'cap_net_bind_service=+ep' ./evan-proxy`); NAT/port-forward setups can instead forward external `80`/`443` to this host. Setting `AUTOCERT_HOST` implies `FORCE_HTTPS=true`. Persist `AUTOCERT_DIR` so certs survive restarts and you don't hit Let's Encrypt rate limits.
+
+## Device pairing (per-device tokens)
+
+A phone running the iOS companion app never stores the admin password. Instead, each device gets its own long-lived, revocable bearer token, provisioned by scanning a QR code:
+
+1. In the admin UI, open the **devices** panel and click **add device**. The server mints a single-use enrollment code (5-minute expiry) and the UI renders it as a QR encoding an `evanproxy://pair?host=<host>&code=<code>` deep link.
+2. The device scans the QR and POSTs the code to `/api/pair`, which redeems it exactly once for a bearer token. The server stores only the token's SHA-256 — the plaintext token is returned to the device once and never again.
+3. The device authenticates every API call with `Authorization: Bearer <token>`. Protected endpoints accept either that header or the browser session cookie.
+
+Paired devices are listed in the same panel with their last-seen time; revoking one immediately invalidates its token (the app gets `401` and must re-pair). Device management itself (`/api/devices/enroll` and `/api/devices`) accepts only the browser session, never a bearer token — a leaked device token cannot enroll a replacement for itself or revoke other devices. Pair over HTTPS only — the token travels in the pairing response.
 
 ## Building
 

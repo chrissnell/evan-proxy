@@ -440,6 +440,32 @@ button:hover {
   white-space: nowrap;
 }
 
+/* Device pairing QR pane */
+.pair-pane {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pair-pane img {
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
+}
+
+.pair-info p {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+}
+
+.pair-info code {
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
 /* Inline edit rows (dns, port, password) */
 .inline-edit-row td {
   padding: 0.4rem 0;

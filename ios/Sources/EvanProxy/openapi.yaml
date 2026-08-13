@@ -9,11 +9,13 @@ info:
     stream.
 
     Authentication is a session cookie (`evan-proxy-session`) obtained from
-    `POST /api/login`. A native client (e.g. the iOS app) can rely on
-    `URLSession`'s cookie store to send it automatically. The cookie carries a
-    sliding 24h TTL and the session store is in-memory, so a client that wants
-    a "log in once" experience should keep the credentials in the Keychain and
-    silently re-authenticate whenever it receives a `401`.
+    `POST /api/login`, or a per-device bearer token (`Authorization: Bearer
+    <token>`) obtained once via QR pairing (`POST /api/pair`). The cookie
+    carries a sliding 24h TTL and the session store is in-memory, so a browser
+    client should re-authenticate whenever it receives a `401`. Device tokens
+    are long-lived and revocable from the admin UI; a native client should
+    store the token in the Keychain and treat a `401` as "token revoked —
+    re-pair".
 
     Error responses are `text/plain` today (the handlers use `http.Error`); the
     body is a short human-readable message. Clients should key off the status
@@ -24,6 +26,7 @@ servers:
 
 security:
   - sessionCookie: []
+  - bearerAuth: []
 
 tags:
   - name: auth
@@ -32,6 +35,7 @@ tags:
   - name: downtime
   - name: stats
   - name: system
+  - name: devices
 
 paths:
   /api/login:
@@ -425,12 +429,132 @@ paths:
                 properties:
                   version: { type: string }
 
+  /api/devices/enroll:
+    post:
+      tags: [devices]
+      summary: Create a single-use device enrollment code
+      description: |
+        Admin-only. Mints a short-lived (5 min), single-use enrollment code and
+        returns it with the `evanproxy://pair` deep link the device redeems at
+        `POST /api/pair`. The admin UI renders the link as a QR code
+        (`GET /api/devices/enroll?code=`). Session cookie only — a device
+        bearer token cannot enroll new devices.
+      operationId: enrollDevice
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Enrollment code created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+    get:
+      tags: [devices]
+      summary: Render an enrollment code's pair link as an SVG QR
+      operationId: getEnrollQR
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: QR code for the `evanproxy://pair` deep link.
+          content:
+            image/svg+xml:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Unknown or expired enrollment code.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/pair:
+    post:
+      tags: [devices]
+      summary: Redeem an enrollment code for a device bearer token
+      description: |
+        Public but gated by the single-use enrollment code from
+        `POST /api/devices/enroll`. Returns the bearer token exactly once — the
+        server stores only its SHA-256. Present it on protected endpoints as
+        `Authorization: Bearer <token>`. A revoked token yields `401`.
+      operationId: pairDevice
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PairRequest'
+      responses:
+        '200':
+          description: Device paired; the token is returned only here.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PairResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Unknown, expired, or already-used enrollment code.
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /api/devices:
+    get:
+      tags: [devices]
+      summary: List paired devices
+      description: Session cookie only — a device bearer token cannot list devices.
+      operationId: listDevices
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: All paired devices (never the tokens themselves).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Device' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [devices]
+      summary: Revoke a device token
+      description: Session cookie only — a device bearer token cannot revoke devices.
+      operationId: revokeDevice
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Device revoked; its bearer token is now invalid.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Device not found.
+          content:
+            text/plain:
+              schema: { type: string }
+
 components:
   securitySchemes:
     sessionCookie:
       type: apiKey
       in: cookie
       name: evan-proxy-session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Per-device token obtained once from `POST /api/pair`.
 
   responses:
     BadRequest:
@@ -463,6 +587,53 @@ components:
       properties:
         username: { type: string }
         password: { type: string }
+
+    EnrollResponse:
+      type: object
+      required: [code, pair_url, expires_in]
+      properties:
+        code:
+          type: string
+          description: Single-use enrollment code.
+        pair_url:
+          type: string
+          description: "`evanproxy://pair?host=<host>&code=<code>` deep link."
+        expires_in:
+          type: integer
+          description: Seconds until the code expires.
+
+    PairRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: Enrollment code from the scanned QR.
+        device_name:
+          type: string
+          maxLength: 64
+          description: >-
+            Human-readable device name shown in the admin UI; truncated to 64
+            characters server-side.
+
+    PairResponse:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: Long-lived bearer token; shown exactly once.
+
+    Device:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        created_at: { type: string }
+        last_seen_at:
+          type: string
+          description: Set on first authenticated use; absent until then.
 
     DNSConfig:
       type: object

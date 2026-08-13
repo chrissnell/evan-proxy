@@ -102,6 +102,19 @@ func Open(path string, lg *logging.Logger) (*DB, error) {
 		return nil, fmt.Errorf("creating users table: %w", err)
 	}
 
+	if _, err := sqlDB.Exec(`
+		CREATE TABLE IF NOT EXISTS device_tokens (
+			id           TEXT PRIMARY KEY,
+			token_sha256 BLOB NOT NULL UNIQUE,
+			name         TEXT NOT NULL DEFAULT '',
+			created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
+			last_seen_at DATETIME
+		)
+	`); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("creating device_tokens table: %w", err)
+	}
+
 	udb := &DB{
 		db:            sqlDB,
 		logger:        lg,

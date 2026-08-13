@@ -48,6 +48,9 @@ func setupAPI(t *testing.T) *api {
 	limiter := ratelimit.New(3, time.Minute)
 	t.Cleanup(func() { limiter.Stop() })
 
+	enroll := newEnrollStore(5 * time.Minute)
+	t.Cleanup(enroll.Stop)
+
 	return &api{
 		auth:            auth.NewAdminAuth("admin", mustBcrypt(t, "correct-horse")),
 		sessions:        sessions,
@@ -56,6 +59,7 @@ func setupAPI(t *testing.T) *api {
 		loginLimiter:    limiter,
 		globalFails:     newGlobalCounter(100, time.Minute),
 		loginRetryAfter: "60",
+		enroll:          enroll,
 	}
 }
 
