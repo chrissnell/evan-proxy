@@ -154,5 +154,65 @@ func TestLoadDNSProtocolTLSWithServer(t *testing.T) {
 	}
 }
 
+func TestLoadAdminLoginDefaults(t *testing.T) {
+	setEnv(t, validEnv())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AdminLoginRateLimit != 5 {
+		t.Errorf("AdminLoginRateLimit = %d, want 5", cfg.AdminLoginRateLimit)
+	}
+	if cfg.AdminLoginWindow != 15*time.Minute {
+		t.Errorf("AdminLoginWindow = %v, want 15m", cfg.AdminLoginWindow)
+	}
+	if cfg.AdminLoginGlobalMax != 100 {
+		t.Errorf("AdminLoginGlobalMax = %d, want 100", cfg.AdminLoginGlobalMax)
+	}
+	if len(cfg.TrustedProxyCIDRs) != 0 {
+		t.Errorf("TrustedProxyCIDRs = %v, want empty", cfg.TrustedProxyCIDRs)
+	}
+}
+
+func TestLoadValidTrustedProxyCIDR(t *testing.T) {
+	env := validEnv()
+	env["TRUSTED_PROXY_CIDRS"] = "10.0.0.0/8, 192.168.0.0/16"
+	setEnv(t, env)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.TrustedProxyCIDRs) != 2 {
+		t.Fatalf("want 2 CIDRs, got %v", cfg.TrustedProxyCIDRs)
+	}
+}
+
+func TestLoadInvalidTrustedProxyCIDR(t *testing.T) {
+	env := validEnv()
+	env["TRUSTED_PROXY_CIDRS"] = "not-a-cidr"
+	setEnv(t, env)
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for invalid CIDR")
+	}
+}
+
+func TestLoadInvalidAdminLoginRateLimit(t *testing.T) {
+	env := validEnv()
+	env["ADMIN_LOGIN_RATE_LIMIT"] = "0"
+	setEnv(t, env)
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for ADMIN_LOGIN_RATE_LIMIT=0 (would lock out admin)")
+	}
+}
+
+func TestLoadInvalidAdminLoginWindow(t *testing.T) {
+	env := validEnv()
+	env["ADMIN_LOGIN_WINDOW"] = "0s"
+	setEnv(t, env)
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for ADMIN_LOGIN_WINDOW=0 (would panic time.NewTicker)")
+	}
+}
+
 // Suppress unused import warning
 var _ = os.Getenv

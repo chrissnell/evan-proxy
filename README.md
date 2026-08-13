@@ -70,8 +70,12 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `CONNECT_DIAL_TIMEOUT` | `10s` | Timeout for dialing target hosts |
 | `IDLE_TIMEOUT` | `300s` | TCP idle connection timeout |
 | `HTTP_TIMEOUT` | `30s` | HTTP response timeout |
-| `AUTH_FAIL_RATE_LIMIT` | `5` | Failed auth attempts before rate limiting kicks in |
-| `AUTH_FAIL_WINDOW` | `60s` | Sliding window for rate limiting |
+| `AUTH_FAIL_RATE_LIMIT` | `5` | Failed proxy auth attempts before rate limiting kicks in |
+| `AUTH_FAIL_WINDOW` | `60s` | Sliding window for proxy auth rate limiting |
+| `ADMIN_LOGIN_RATE_LIMIT` | `5` | Failed `/api/login` attempts per client IP before returning `429`. Only failures count, so repeated successful logins (iOS reauth) never trip it. |
+| `ADMIN_LOGIN_WINDOW` | `15m` | Sliding window for admin login rate limiting (per-IP and global) |
+| `ADMIN_LOGIN_GLOBAL_MAX` | `100` | Global failure ceiling across all IPs in the window; backstop against rotating-IP attacks on the single admin account (`0` = disabled) |
+| `TRUSTED_PROXY_CIDRS` | | Comma-separated CIDRs whose `X-Forwarded-For` is trusted for admin client-IP detection (e.g. your ingress/LB). Empty = trust none and use the peer address, which prevents header-spoofed rate-limit evasion. |
 | `LOG_FORMAT` | `human` | Log format: `json` or `human` |
 | `LOG_HEADERS` | `false` | When `true`, log per-request headers on the plain-HTTP forward path: inbound headers, which hop-by-hop headers were stripped, and the exact headers forwarded upstream. Diagnostic only — verbose, and credentials are redacted. HTTPS (`CONNECT`) traffic is an opaque TCP tunnel whose headers are never inspected or modified. |
 | `TZ` | | IANA timezone for downtime schedules (e.g. `America/Denver`) |
@@ -158,6 +162,10 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `admin.listen` | string | `":9090"` | Admin interface listen address |
 | `admin.user` | string | `"admin"` | Admin username |
 | `admin.passwordHash` | string | `"$2y$10$CHANGEME"` | Admin password as bcrypt hash |
+| `admin.loginRateLimit` | int | `5` | Failed `/api/login` attempts per client IP before `429` |
+| `admin.loginWindow` | string | `"15m"` | Sliding window for admin login rate limiting |
+| `admin.loginGlobalMax` | int | `100` | Global failure ceiling across all IPs (`0` = disabled) |
+| `admin.trustedProxyCIDRs` | list | `[]` | CIDRs whose `X-Forwarded-For` is trusted for client-IP detection; empty = trust none |
 | `existingSecret` | string | `""` | Use a pre-created Secret instead of generating one. Must contain keys: `ADMIN_USER`, `ADMIN_PASSWORD` |
 | `persistence.enabled` | bool | `true` | Enable persistent storage for SQLite database |
 | `persistence.size` | string | `"1Gi"` | PVC size |

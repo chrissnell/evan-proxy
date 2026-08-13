@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -70,7 +71,21 @@ func main() {
 	counter := stats.NewTrafficCounter(collector)
 	counter.AddObserver(m.ObserveLiveBytes)
 	proxyHandler := proxy.New(cfg, users, users, users, users, users, a, limiter, logger, counter, m)
-	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version)
+
+	// Parse trusted-proxy CIDRs for admin login client-IP extraction. The
+	// config layer already validated each entry, so ParseCIDR cannot fail here.
+	var trustedProxies []*net.IPNet
+	for _, cidr := range cfg.TrustedProxyCIDRs {
+		if _, n, err := net.ParseCIDR(cidr); err == nil {
+			trustedProxies = append(trustedProxies, n)
+		}
+	}
+	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version, admin.Options{
+		LoginRateLimit: cfg.AdminLoginRateLimit,
+		LoginWindow:    cfg.AdminLoginWindow,
+		LoginGlobalMax: cfg.AdminLoginGlobalMax,
+		TrustedProxies: trustedProxies,
+	})
 
 	// Per-user dedicated port listeners
 	if err := proxyHandler.StartUserListeners(); err != nil {

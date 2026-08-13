@@ -68,6 +68,15 @@ admin:
   # bcrypt hash of admin password
   # generate with: htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
   passwordHash: "$2y$10$CHANGEME"
+  # Login brute-force protection for /api/login. Only failed attempts count, so
+  # a device that keeps logging in successfully (iOS reauth) never trips it.
+  loginRateLimit: 5      # per-IP failures allowed within loginWindow
+  loginWindow: "15m"     # sliding window for per-IP and global failures
+  loginGlobalMax: 100    # global failure ceiling across all IPs (0 = disabled)
+  # CIDRs whose X-Forwarded-For header is trusted (your ingress/LB). When empty,
+  # XFF is ignored and the immediate peer address is used — safe default that
+  # prevents header-spoofed rate-limit evasion.
+  trustedProxyCIDRs: []
 
 # Use an existing secret instead of creating one
 # Secret must contain: ADMIN_USER, ADMIN_PASSWORD
