@@ -719,7 +719,7 @@ git commit -m "add TLS support: secure cookie, HSTS, ingress TLS, optional autoc
 
 ## Phase 5 — Device token model + QR pairing (server)
 
-**Model:** A `device_tokens` table stores the **SHA-256 of each token** (never the token itself), plus a name and timestamps. Pairing is two steps: (1) an authenticated admin creates a short-lived, single-use **enrollment code** (kept in memory, like sessions); the UI renders it as a QR encoding an `evanproxy://pair?host=<host>&code=<code>` deep link. (2) The device POSTs the code to `/api/pair` and receives a long-lived bearer token **once**. Protected endpoints then accept either the session cookie (browser) or `Authorization: Bearer <token>` (app).
+**Model:** A `device_tokens` table stores the **SHA-256 of each token** (never the token itself), plus a name and timestamps. Pairing is two steps: (1) an authenticated admin creates a short-lived, single-use **enrollment code** (kept in memory, like sessions); the UI renders it as a QR encoding an `evanproxy://pair?host=<host>&code=<code>` deep link. (2) The device POSTs the code to `/api/pair` and receives a long-lived bearer token **once**. Protected endpoints then accept either the session cookie (browser) or `Authorization: Bearer <token>` (app) — **except device management**: `/api/devices/enroll` and `/api/devices` (list/revoke) accept only the session cookie, so a leaked device token cannot enroll a replacement for itself or revoke other devices, and revoking a token is a complete kill. Phase 6 must not expect the iOS app to reach these endpoints with its bearer token.
 
 **Files:**
 - Create: `pkg/userdb/devicetokens.go` + `_test.go` (token store)

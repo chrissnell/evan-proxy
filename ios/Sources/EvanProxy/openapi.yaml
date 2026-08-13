@@ -437,8 +437,11 @@ paths:
         Admin-only. Mints a short-lived (5 min), single-use enrollment code and
         returns it with the `evanproxy://pair` deep link the device redeems at
         `POST /api/pair`. The admin UI renders the link as a QR code
-        (`GET /api/devices/enroll?code=`).
+        (`GET /api/devices/enroll?code=`). Session cookie only — a device
+        bearer token cannot enroll new devices.
       operationId: enrollDevice
+      security:
+        - sessionCookie: []
       responses:
         '200':
           description: Enrollment code created.
@@ -452,6 +455,8 @@ paths:
       tags: [devices]
       summary: Render an enrollment code's pair link as an SVG QR
       operationId: getEnrollQR
+      security:
+        - sessionCookie: []
       parameters:
         - name: code
           in: query
@@ -504,7 +509,10 @@ paths:
     get:
       tags: [devices]
       summary: List paired devices
+      description: Session cookie only — a device bearer token cannot list devices.
       operationId: listDevices
+      security:
+        - sessionCookie: []
       responses:
         '200':
           description: All paired devices (never the tokens themselves).
@@ -517,7 +525,10 @@ paths:
     delete:
       tags: [devices]
       summary: Revoke a device token
+      description: Session cookie only — a device bearer token cannot revoke devices.
       operationId: revokeDevice
+      security:
+        - sessionCookie: []
       parameters:
         - name: id
           in: query
@@ -600,7 +611,10 @@ components:
           description: Enrollment code from the scanned QR.
         device_name:
           type: string
-          description: Human-readable device name shown in the admin UI.
+          maxLength: 64
+          description: >-
+            Human-readable device name shown in the admin UI; truncated to 64
+            characters server-side.
 
     PairResponse:
       type: object

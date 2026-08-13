@@ -124,6 +124,21 @@ func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// requireAdminSession accepts only the browser session cookie, never a device
+// bearer token. Device management stays session-only so a leaked token cannot
+// enroll a replacement for itself or revoke other devices — revoking a token
+// must be a complete kill.
+func (a *api) requireAdminSession(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie(sessionCookie)
+		if err != nil || !a.sessions.Validate(c.Value) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func (a *api) handleTopSites(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(a.stats.TopHosts(10))

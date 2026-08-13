@@ -78,10 +78,11 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 	mux.HandleFunc("/api/users/downtime", a.requireSession(a.handleUpdateDowntime))
 	mux.HandleFunc("/api/users/downtime-override", a.requireSession(a.handleDowntimeOverride))
 
-	// Device pairing: enroll/list/revoke are admin-only; /api/pair is public
-	// but gated by the single-use enrollment code.
-	mux.HandleFunc("/api/devices/enroll", a.requireSession(a.handleEnroll))
-	mux.HandleFunc("/api/devices", a.requireSession(a.handleDevices))
+	// Device pairing: enroll/list/revoke require the browser session (a device
+	// bearer token must not be able to mint or revoke tokens); /api/pair is
+	// public but gated by the single-use enrollment code.
+	mux.HandleFunc("/api/devices/enroll", a.requireAdminSession(a.handleEnroll))
+	mux.HandleFunc("/api/devices", a.requireAdminSession(a.handleDevices))
 	mux.HandleFunc("/api/pair", a.handlePair)
 
 	// Version (no auth)

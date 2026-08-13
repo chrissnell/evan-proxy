@@ -25,9 +25,36 @@ func sessionRequest(a *api, method, target string, body string) *http.Request {
 func TestEnroll_RequiresAuth(t *testing.T) {
 	a := setupAPI(t)
 	w := httptest.NewRecorder()
-	a.requireSession(a.handleEnroll)(w, httptest.NewRequest(http.MethodPost, "/api/devices/enroll", nil))
+	a.requireAdminSession(a.handleEnroll)(w, httptest.NewRequest(http.MethodPost, "/api/devices/enroll", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated enroll: want 401, got %d", w.Code)
+	}
+}
+
+// A device bearer token must not manage devices: a leaked token could
+// otherwise enroll a replacement for itself or revoke other devices.
+func TestDeviceManagement_RejectsBearerToken(t *testing.T) {
+	a := setupAPI(t)
+	tok, _, err := a.users.CreateDeviceToken("phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		method, target string
+		h              http.HandlerFunc
+	}{
+		{http.MethodPost, "/api/devices/enroll", a.handleEnroll},
+		{http.MethodGet, "/api/devices", a.handleDevices},
+		{http.MethodDelete, "/api/devices?id=x", a.handleDevices},
+	} {
+		req := httptest.NewRequest(tc.method, tc.target, nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		w := httptest.NewRecorder()
+		a.requireAdminSession(tc.h)(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s %s with bearer: want 401, got %d", tc.method, tc.target, w.Code)
+		}
 	}
 }
 
@@ -36,7 +63,7 @@ func TestEnrollPairAndBearerAuth(t *testing.T) {
 
 	// Admin creates an enrollment code.
 	w := httptest.NewRecorder()
-	a.requireSession(a.handleEnroll)(w, sessionRequest(a, http.MethodPost, "/api/devices/enroll", ""))
+	a.requireAdminSession(a.handleEnroll)(w, sessionRequest(a, http.MethodPost, "/api/devices/enroll", ""))
 	if w.Code != http.StatusOK {
 		t.Fatalf("enroll: want 200, got %d", w.Code)
 	}
@@ -91,7 +118,7 @@ func TestEnrollPairAndBearerAuth(t *testing.T) {
 
 	// The device shows up in the list.
 	w = httptest.NewRecorder()
-	a.requireSession(a.handleDevices)(w, sessionRequest(a, http.MethodGet, "/api/devices", ""))
+	a.requireAdminSession(a.handleDevices)(w, sessionRequest(a, http.MethodGet, "/api/devices", ""))
 	if w.Code != http.StatusOK {
 		t.Fatalf("list devices: want 200, got %d", w.Code)
 	}
@@ -105,7 +132,7 @@ func TestEnrollPairAndBearerAuth(t *testing.T) {
 
 	// Revoking the device kills the bearer token.
 	w = httptest.NewRecorder()
-	a.requireSession(a.handleDevices)(w, sessionRequest(a, http.MethodDelete, "/api/devices?id="+devices[0].ID, ""))
+	a.requireAdminSession(a.handleDevices)(w, sessionRequest(a, http.MethodDelete, "/api/devices?id="+devices[0].ID, ""))
 	if w.Code != http.StatusOK {
 		t.Fatalf("revoke: want 200, got %d", w.Code)
 	}
@@ -130,7 +157,7 @@ func TestPair_BadCode(t *testing.T) {
 func TestRevokeDevice_Unknown(t *testing.T) {
 	a := setupAPI(t)
 	w := httptest.NewRecorder()
-	a.requireSession(a.handleDevices)(w, sessionRequest(a, http.MethodDelete, "/api/devices?id=nope", ""))
+	a.requireAdminSession(a.handleDevices)(w, sessionRequest(a, http.MethodDelete, "/api/devices?id=nope", ""))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("unknown device: want 404, got %d", w.Code)
 	}
@@ -140,7 +167,7 @@ func TestEnrollQR(t *testing.T) {
 	a := setupAPI(t)
 
 	w := httptest.NewRecorder()
-	a.requireSession(a.handleEnroll)(w, sessionRequest(a, http.MethodPost, "/api/devices/enroll", ""))
+	a.requireAdminSession(a.handleEnroll)(w, sessionRequest(a, http.MethodPost, "/api/devices/enroll", ""))
 	var enr struct {
 		Code string `json:"code"`
 	}
@@ -149,7 +176,7 @@ func TestEnrollQR(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	a.requireSession(a.handleEnroll)(w, sessionRequest(a, http.MethodGet, "/api/devices/enroll?code="+enr.Code, ""))
+	a.requireAdminSession(a.handleEnroll)(w, sessionRequest(a, http.MethodGet, "/api/devices/enroll?code="+enr.Code, ""))
 	if w.Code != http.StatusOK {
 		t.Fatalf("QR: want 200, got %d", w.Code)
 	}
@@ -162,7 +189,7 @@ func TestEnrollQR(t *testing.T) {
 
 	// An unknown code must not render a QR.
 	w = httptest.NewRecorder()
-	a.requireSession(a.handleEnroll)(w, sessionRequest(a, http.MethodGet, "/api/devices/enroll?code=bogus", ""))
+	a.requireAdminSession(a.handleEnroll)(w, sessionRequest(a, http.MethodGet, "/api/devices/enroll?code=bogus", ""))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("bogus QR code: want 404, got %d", w.Code)
 	}

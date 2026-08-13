@@ -80,6 +80,9 @@ func (a *api) handlePair(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "device"
 	}
+	if r := []rune(name); len(r) > 64 {
+		name = string(r[:64])
+	}
 	token, id, err := a.users.CreateDeviceToken(name)
 	if err != nil {
 		a.logger.Errorf("admin", "create device token: %v", err)

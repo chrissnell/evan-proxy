@@ -1007,7 +1007,10 @@ async function refreshDevices() {
     var resp = await fetch('/api/devices');
     if (resp.status === 401) { window.location.href = '/login'; return; }
     cachedDevices = await resp.json();
-    deviceDeleteConfirm = null;
+    // Keep a pending revoke confirmation across the poll unless the device is gone.
+    if (deviceDeleteConfirm && !cachedDevices.some(function(d) { return d.id === deviceDeleteConfirm; })) {
+      deviceDeleteConfirm = null;
+    }
     renderDevices(cachedDevices);
   } catch (e) { /* retry next cycle */ }
 }
@@ -1054,6 +1057,8 @@ function showDevicesError(msg) {
   el.style.display = msg ? '' : 'none';
 }
 
+var pairExpireTimer = null;
+
 document.getElementById('add-device-btn').addEventListener('click', async function() {
   showDevicesError('');
   var resp = await fetch('/api/devices/enroll', {method: 'POST'});
@@ -1064,9 +1069,15 @@ document.getElementById('add-device-btn').addEventListener('click', async functi
   document.getElementById('pair-code').textContent = d.code;
   document.getElementById('pair-expiry').textContent = Math.round(d.expires_in / 60);
   document.getElementById('pair-pane').style.display = '';
+  if (pairExpireTimer) clearTimeout(pairExpireTimer);
+  pairExpireTimer = setTimeout(function() {
+    document.getElementById('pair-pane').style.display = 'none';
+    showDevicesError('pairing code expired — click "add device" for a new one');
+  }, d.expires_in * 1000);
 });
 
 document.getElementById('pair-done-btn').addEventListener('click', function() {
+  if (pairExpireTimer) { clearTimeout(pairExpireTimer); pairExpireTimer = null; }
   document.getElementById('pair-pane').style.display = 'none';
   refreshDevices();
 });

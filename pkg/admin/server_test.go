@@ -195,6 +195,19 @@ func TestServerDevicePairingFlow(t *testing.T) {
 		t.Fatalf("bearer /api/users = %d, want 200", w.Code)
 	}
 
+	// But it must NOT manage devices — enroll and list/revoke are session-only,
+	// so a leaked token cannot mint a replacement or revoke other devices.
+	req = httptest.NewRequest(http.MethodPost, "/api/devices/enroll", nil)
+	req.Header.Set("Authorization", "Bearer "+pair.Token)
+	if w = do(req); w.Code != http.StatusUnauthorized {
+		t.Fatalf("bearer enroll = %d, want 401", w.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/devices", nil)
+	req.Header.Set("Authorization", "Bearer "+pair.Token)
+	if w = do(req); w.Code != http.StatusUnauthorized {
+		t.Fatalf("bearer list devices = %d, want 401", w.Code)
+	}
+
 	// Revoke the device; the token stops working.
 	req = httptest.NewRequest(http.MethodGet, "/api/devices", nil)
 	req.AddCookie(session)

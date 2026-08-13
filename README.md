@@ -207,7 +207,7 @@ A phone running the iOS companion app never stores the admin password. Instead, 
 2. The device scans the QR and POSTs the code to `/api/pair`, which redeems it exactly once for a bearer token. The server stores only the token's SHA-256 — the plaintext token is returned to the device once and never again.
 3. The device authenticates every API call with `Authorization: Bearer <token>`. Protected endpoints accept either that header or the browser session cookie.
 
-Paired devices are listed in the same panel with their last-seen time; revoking one immediately invalidates its token (the app gets `401` and must re-pair). Pair over HTTPS only — the token travels in the pairing response.
+Paired devices are listed in the same panel with their last-seen time; revoking one immediately invalidates its token (the app gets `401` and must re-pair). Device management itself (`/api/devices/enroll` and `/api/devices`) accepts only the browser session, never a bearer token — a leaked device token cannot enroll a replacement for itself or revoke other devices. Pair over HTTPS only — the token travels in the pairing response.
 
 ## Building
 
