@@ -75,6 +75,19 @@ final class AuthStoreTests: XCTestCase {
         XCTAssertNil(store.currentDeviceToken())
     }
 
+    func test_resumePairedSession_authenticatesOnlyWithToken() throws {
+        let store = makeStore()
+        store.resumePairedSession()
+        XCTAssertFalse(store.isAuthenticated)     // nothing stored yet
+        try store.storePairing(token: "tok123")
+        store.unpair()
+        store.resumePairedSession()
+        XCTAssertFalse(store.isAuthenticated)     // unpaired
+        try store.storePairing(token: "tok456")
+        store.resumePairedSession()
+        XCTAssertTrue(store.isAuthenticated)
+    }
+
     func test_logout_alsoClearsDeviceToken() throws {
         let store = makeStore()
         try store.storePairing(token: "tok123")

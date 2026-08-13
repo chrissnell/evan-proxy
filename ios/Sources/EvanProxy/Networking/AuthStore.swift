@@ -52,6 +52,12 @@ final class AuthStore {
         isAuthenticated = true
     }
 
+    /// On launch a stored token is trusted until the server says otherwise —
+    /// a revoked one 401s on first use and drops back to pairing.
+    func resumePairedSession() {
+        if hasDeviceToken { isAuthenticated = true }
+    }
+
     /// A revoked token can't be refreshed — clear it so the UI returns to pairing.
     func unpair() {
         try? keychain.remove("deviceToken")

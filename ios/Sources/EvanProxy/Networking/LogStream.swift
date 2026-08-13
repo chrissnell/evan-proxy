@@ -54,10 +54,16 @@ enum SSEParser {
 struct LogStream {
     let baseURL: URL
     var reauth: (@Sendable () async -> Void)?
+    /// Device bearer token for QR-paired installs (the SSE request bypasses the
+    /// generated client, so the middleware can't add the header for us).
+    var bearer: (@Sendable () -> String?)?
 
-    init(baseURL: URL, reauth: (@Sendable () async -> Void)? = nil) {
+    init(baseURL: URL,
+         reauth: (@Sendable () async -> Void)? = nil,
+         bearer: (@Sendable () -> String?)? = nil) {
         self.baseURL = baseURL
         self.reauth = reauth
+        self.bearer = bearer
     }
 
     /// Open the SSE endpoint and yield entries until cancelled.
@@ -65,6 +71,7 @@ struct LogStream {
     func connect() -> AsyncThrowingStream<Components.Schemas.LogEntry, Error> {
         let url = baseURL.appendingPathComponent("api/logs")
         let reauth = self.reauth
+        let bearer = self.bearer
         return AsyncThrowingStream { cont in
             let task = Task {
                 var delay = 1.0
@@ -72,6 +79,9 @@ struct LogStream {
                     do {
                         var req = URLRequest(url: url)
                         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                        if let tok = bearer?() {
+                            req.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
+                        }
                         let (bytes, resp) = try await APIClientFactory.session.bytes(for: req)
                         if (resp as? HTTPURLResponse)?.statusCode == 401 {
                             await reauth?()
