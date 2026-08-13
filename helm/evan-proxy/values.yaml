@@ -61,6 +61,23 @@ persistence:
   size: 1Gi
   storageClass: ""  # empty = default StorageClass
 
+# Prometheus metrics — served on a dedicated internal listener, never on the
+# public admin LoadBalancer. Inside the pod it binds 0.0.0.0 so an in-cluster
+# scraper can reach it, but it is exposed only through an internal ClusterIP
+# Service guarded by a NetworkPolicy limited to the monitoring namespace.
+metrics:
+  # Listen address inside the pod. Bind 0.0.0.0 so the ClusterIP Service can
+  # reach it; NetworkPolicy restricts who may actually connect.
+  listen: "0.0.0.0:9091"
+  # Include the per-user label on request metrics. This is PII (the children's
+  # usernames) — keep false unless you accept exposing usernames to Prometheus.
+  userLabel: false
+  # Port the internal metrics ClusterIP Service listens on.
+  port: 9091
+  # Kubernetes namespace running Prometheus; the NetworkPolicy allows metrics
+  # scrapes only from pods in this namespace.
+  scrapeNamespace: "monitoring"
+
 # Admin interface
 admin:
   listen: ":9090"

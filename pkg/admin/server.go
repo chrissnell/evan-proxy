@@ -23,7 +23,7 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string) *Server {
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, mountMetrics bool) *Server {
 	sessions := NewSessionStore(24*time.Hour, lg)
 	a := &api{
 		auth:     adminAuth,
@@ -62,8 +62,12 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 		fmt.Fprintf(w, `{"version":%q}`, version)
 	})
 
-	// Prometheus metrics (no auth — standard for scraping)
-	mux.Handle("/metrics", m.Handler())
+	// Prometheus metrics (no auth — standard for scraping). Only mounted on the
+	// admin port when no dedicated internal metrics listener is configured;
+	// otherwise metrics stay off the public admin host entirely.
+	if mountMetrics {
+		mux.Handle("/metrics", m.Handler())
+	}
 
 	// pprof debug endpoints (no auth — admin port is internal-only)
 	mux.HandleFunc("/debug/pprof/", pprof.Index)

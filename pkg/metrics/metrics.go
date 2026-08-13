@@ -12,7 +12,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// Options configures the metrics collector.
+type Options struct {
+	// UserLabel includes the per-user label on evanproxy_requests_total. This
+	// is PII (the children's usernames) so it is opt-in and off by default.
+	UserLabel bool
+}
+
 type Metrics struct {
+	reg       *prometheus.Registry
+	userLabel bool
+
 	requests      *prometheus.CounterVec
 	blocked       *prometheus.CounterVec
 	duration      *prometheus.HistogramVec
@@ -24,12 +34,20 @@ type Metrics struct {
 	dnsDuration   prometheus.Histogram
 }
 
-func New() *Metrics {
+func New(opts Options) *Metrics {
+	requestLabels := []string{"method", "status_code"}
+	requestHelp := "Total proxy requests by method and status code."
+	if opts.UserLabel {
+		requestLabels = append(requestLabels, "user")
+		requestHelp = "Total proxy requests by method, status code, and user."
+	}
+
 	m := &Metrics{
+		userLabel: opts.UserLabel,
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "evanproxy_requests_total",
-			Help: "Total proxy requests by method, status code, and user.",
-		}, []string{"method", "status_code", "user"}),
+			Help: requestHelp,
+		}, requestLabels),
 
 		blocked: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "evanproxy_blocked_total",
@@ -74,7 +92,10 @@ func New() *Metrics {
 		}),
 	}
 
-	prometheus.MustRegister(
+	// Use a private registry rather than the global default so metrics can't
+	// leak across processes and tests stay isolated.
+	m.reg = prometheus.NewRegistry()
+	m.reg.MustRegister(
 		m.requests,
 		m.blocked,
 		m.duration,
@@ -91,7 +112,7 @@ func New() *Metrics {
 
 // Handler returns the Prometheus HTTP handler for /metrics.
 func (m *Metrics) Handler() http.Handler {
-	return promhttp.Handler()
+	return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{})
 }
 
 // ObserveLiveBytes updates throughput counters from live traffic deltas.
@@ -115,12 +136,17 @@ func (m *Metrics) Observe(e logging.Entry) {
 		m.activeTunnels.Dec()
 	}
 
-	// Request counter
-	user := e.User
-	if user == "" {
-		user = "anonymous"
+	// Request counter. The per-user label is PII (usernames) and only emitted
+	// when explicitly enabled.
+	if m.userLabel {
+		user := e.User
+		if user == "" {
+			user = "anonymous"
+		}
+		m.requests.WithLabelValues(e.Method, strconv.Itoa(e.Status), user).Inc()
+	} else {
+		m.requests.WithLabelValues(e.Method, strconv.Itoa(e.Status)).Inc()
 	}
-	m.requests.WithLabelValues(e.Method, strconv.Itoa(e.Status), user).Inc()
 
 	// Blocked request classification
 	switch {

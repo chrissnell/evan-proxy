@@ -6,6 +6,9 @@ metadata:
     {{- include "evan-proxy.labels" . | nindent 4 }}
 data:
   ADMIN_LISTEN: {{ .Values.admin.listen | quote }}
+  # Metrics — internal listener, never on the public admin port
+  METRICS_LISTEN: {{ .Values.metrics.listen | quote }}
+  METRICS_USER_LABEL: {{ .Values.metrics.userLabel | default false | quote }}
   # Console logging
   LOG_FORMAT: {{ .Values.logging.console.format | quote }}
   # Verbose per-request header logging (plain-HTTP forward path only)

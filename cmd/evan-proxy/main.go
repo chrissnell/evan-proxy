@@ -64,13 +64,15 @@ func main() {
 	collector := stats.NewCollector()
 	logger.AddObserver(collector.Observe)
 
-	m := metrics.New()
+	m := metrics.New(metrics.Options{UserLabel: cfg.MetricsUserLabel})
 	logger.AddObserver(m.Observe)
 
 	counter := stats.NewTrafficCounter(collector)
 	counter.AddObserver(m.ObserveLiveBytes)
 	proxyHandler := proxy.New(cfg, users, users, users, users, users, a, limiter, logger, counter, m)
-	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version)
+	// When a dedicated metrics listener is configured, /metrics is served there
+	// instead of on the public admin port.
+	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version, cfg.MetricsListen == "")
 
 	// Per-user dedicated port listeners
 	if err := proxyHandler.StartUserListeners(); err != nil {
@@ -93,6 +95,28 @@ func main() {
 		}
 	}()
 
+	// Internal metrics listener — kept off the public admin host. Bound to a
+	// private address by default (127.0.0.1:9091); in k8s it binds inside the
+	// pod and is reached only via a ClusterIP + NetworkPolicy.
+	var metricsSrv *http.Server
+	if cfg.MetricsListen != "" {
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", m.Handler())
+		metricsSrv = &http.Server{
+			Addr:         cfg.MetricsListen,
+			Handler:      metricsMux,
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  120 * time.Second,
+		}
+		go func() {
+			logger.Infof("metrics", "listening on %s", cfg.MetricsListen)
+			if err := metricsSrv.ListenAndServe(); err != http.ErrServerClosed {
+				logger.Fatalf("metrics", "%v", err)
+			}
+		}()
+	}
+
 	// Graceful shutdown
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -106,6 +130,9 @@ func main() {
 	proxyHandler.ShutdownUserListeners(ctx)
 	proxyHandler.StopAuthCleanup()
 	adminSrv.Shutdown(ctx)
+	if metricsSrv != nil {
+		metricsSrv.Shutdown(ctx)
+	}
 	counter.Stop()
 	collector.Stop()
 	limiter.Stop()
