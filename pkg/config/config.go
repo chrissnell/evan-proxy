@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -15,9 +16,18 @@ type Config struct {
 	// Admin listener
 	AdminListen string
 
+	// Metrics
+	MetricsListen    string // "" = mount /metrics on the admin port (legacy); else its own listener addr
+	MetricsUserLabel bool   // include the per-user label (PII) on request metrics — default false
+
 	// Admin credentials
 	AdminUser     string
 	AdminPassword string // bcrypt hash
+
+	// TLS / transport security
+	ForceHTTPS   bool   // set Secure session cookie + HSTS; assume TLS terminates in front or via autocert
+	AutocertHost string // if set, terminate TLS in-process via Let's Encrypt for this hostname
+	AutocertDir  string // cert cache dir (persistent volume)
 
 	// DNS
 	DNSServer   string // e.g. "1.1.1.1:53", empty = system default
@@ -32,6 +42,12 @@ type Config struct {
 	// Rate limiting
 	AuthFailRateLimit int
 	AuthFailWindow    time.Duration
+
+	// Admin login brute-force protection
+	AdminLoginRateLimit int           // per-IP failures allowed within the window
+	AdminLoginWindow    time.Duration // sliding window for per-IP failures
+	AdminLoginGlobalMax int           // global failure ceiling across all IPs in the window (0 = disabled)
+	TrustedProxyCIDRs   []string      // CIDRs whose X-Forwarded-For is trusted; empty = trust none
 
 	// Per-user dedicated proxy ports
 	UserPortMin int // first port in range (inclusive)
@@ -62,14 +78,25 @@ type Config struct {
 	PACPath          string   // request path the PAC is served at (default "/proxy.pac")
 	PACProxyEndpoint string   // proxy "host:port" the PAC returns; empty = echo request Host
 	PACBypassDomains []string // domain suffixes routed DIRECT (bypass proxy)
+
+	// pprof profiling endpoints. Never served on the public admin port. When
+	// enabled they bind a separate loopback listener (PProfListen), reachable
+	// only via `kubectl port-forward`. Off by default.
+	PProfEnabled bool
+	PProfListen  string // "host:port" — default "127.0.0.1:6060" (loopback only)
 }
 
 func Load() (*Config, error) {
 	cfg := &Config{
 		ProxyDBPath:         envOr("PROXY_DB_PATH", "/data/evan-proxy/users.db"),
 		AdminListen:         envOr("ADMIN_LISTEN", ":9090"),
+		MetricsListen:       envOr("METRICS_LISTEN", "127.0.0.1:9091"),
+		MetricsUserLabel:    envBool("METRICS_USER_LABEL", false),
 		AdminUser:           os.Getenv("ADMIN_USER"),
 		AdminPassword:       os.Getenv("ADMIN_PASSWORD"),
+		ForceHTTPS:          envBool("FORCE_HTTPS", false),
+		AutocertHost:        os.Getenv("AUTOCERT_HOST"),
+		AutocertDir:         envOr("AUTOCERT_DIR", "/data/evan-proxy/autocert"),
 		DNSServer:           os.Getenv("DNS_SERVER"),
 		DNSProtocol:         envOr("DNS_PROTOCOL", "plain"),
 		AuthRetryTimeout:    envDuration("AUTH_RETRY_TIMEOUT", 5*time.Second),
@@ -78,6 +105,10 @@ func Load() (*Config, error) {
 		HTTPTimeout:         envDuration("HTTP_TIMEOUT", 30*time.Second),
 		AuthFailRateLimit:   envInt("AUTH_FAIL_RATE_LIMIT", 5),
 		AuthFailWindow:      envDuration("AUTH_FAIL_WINDOW", 60*time.Second),
+		AdminLoginRateLimit: envInt("ADMIN_LOGIN_RATE_LIMIT", 5),
+		AdminLoginWindow:    envDuration("ADMIN_LOGIN_WINDOW", 15*time.Minute),
+		AdminLoginGlobalMax: envInt("ADMIN_LOGIN_GLOBAL_MAX", 100),
+		TrustedProxyCIDRs:   envCSV("TRUSTED_PROXY_CIDRS", nil),
 		UserPortMin:         envInt("USER_PORT_MIN", 8081),
 		UserPortMax:         envInt("USER_PORT_MAX", 8090),
 		LogFormat:           envOr("LOG_FORMAT", "human"),
@@ -91,6 +122,14 @@ func Load() (*Config, error) {
 		PACProxyEndpoint:    os.Getenv("PAC_PROXY_ENDPOINT"),
 		PACBypassDomains: envCSV("PAC_BYPASS_DOMAINS",
 			[]string{"venmo.com", "paypal.com", "paypalobjects.com", "braintreegateway.com", "braintree-api.com"}),
+		PProfEnabled: envBool("PPROF_ENABLED", false),
+		PProfListen:  envOr("PPROF_LISTEN", "127.0.0.1:6060"),
+	}
+
+	// Built-in autocert terminates TLS in-process, so cookies are always served
+	// over HTTPS — imply ForceHTTPS to get the Secure flag and HSTS.
+	if cfg.AutocertHost != "" {
+		cfg.ForceHTTPS = true
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -133,6 +172,17 @@ func (c *Config) validate() error {
 	}
 	if c.PACEnabled && c.PACPath == "" {
 		return fmt.Errorf("PAC_PATH must not be empty when PAC_ENABLED is true")
+	}
+	for _, cidr := range c.TrustedProxyCIDRs {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("TRUSTED_PROXY_CIDRS entry %q is not a valid CIDR: %w", cidr, err)
+		}
+	}
+	if c.AdminLoginRateLimit < 1 {
+		return fmt.Errorf("ADMIN_LOGIN_RATE_LIMIT must be >= 1, got %d", c.AdminLoginRateLimit)
+	}
+	if c.AdminLoginWindow <= 0 {
+		return fmt.Errorf("ADMIN_LOGIN_WINDOW must be > 0, got %v", c.AdminLoginWindow)
 	}
 	return nil
 }

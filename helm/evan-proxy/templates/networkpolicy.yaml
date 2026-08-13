@@ -25,6 +25,14 @@ spec:
         - port: {{ $p }}
           protocol: TCP
       {{- end }}
+    # Allow metrics scraping only from the monitoring namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.metrics.scrapeNamespace | quote }}
+      ports:
+        - port: {{ .Values.metrics.port }}
+          protocol: TCP
   egress:
     # Allow DNS
     - ports:

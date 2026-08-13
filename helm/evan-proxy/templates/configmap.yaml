@@ -6,6 +6,18 @@ metadata:
     {{- include "evan-proxy.labels" . | nindent 4 }}
 data:
   ADMIN_LISTEN: {{ .Values.admin.listen | quote }}
+  # Admin login brute-force protection
+  ADMIN_LOGIN_RATE_LIMIT: {{ .Values.admin.loginRateLimit | quote }}
+  ADMIN_LOGIN_WINDOW: {{ .Values.admin.loginWindow | quote }}
+  ADMIN_LOGIN_GLOBAL_MAX: {{ .Values.admin.loginGlobalMax | quote }}
+  {{- if .Values.admin.trustedProxyCIDRs }}
+  TRUSTED_PROXY_CIDRS: {{ join "," .Values.admin.trustedProxyCIDRs | quote }}
+  {{- end }}
+  # Metrics — internal listener, never on the public admin port
+  METRICS_LISTEN: {{ .Values.metrics.listen | quote }}
+  METRICS_USER_LABEL: {{ .Values.metrics.userLabel | default false | quote }}
+  # TLS in front (ingress/LB) → Secure session cookie + HSTS
+  FORCE_HTTPS: {{ .Values.admin.forceHTTPS | default false | quote }}
   # Console logging
   LOG_FORMAT: {{ .Values.logging.console.format | quote }}
   # Verbose per-request header logging (plain-HTTP forward path only)
@@ -45,6 +57,11 @@ data:
   {{- if .Values.pac.bypassDomains }}
   PAC_BYPASS_DOMAINS: {{ join "," .Values.pac.bypassDomains | quote }}
   {{- end }}
+  {{- end }}
+  {{- if .Values.debug.pprofEnabled }}
+  # pprof profiling — bound to a loopback listener only, never the admin port
+  PPROF_ENABLED: "true"
+  PPROF_LISTEN: {{ .Values.debug.pprofListen | quote }}
   {{- end }}
   {{- if .Values.timezone }}
   TZ: {{ .Values.timezone | quote }}

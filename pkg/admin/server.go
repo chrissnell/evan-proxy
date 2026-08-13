@@ -4,13 +4,16 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/pprof"
+	"strconv"
 	"time"
 
 	"evan-proxy/pkg/auth"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/metrics"
+	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
 )
@@ -20,18 +23,36 @@ var staticFS embed.FS
 
 // Server is the admin HTTP handler.
 type Server struct {
-	mux *http.ServeMux
+	handler http.Handler
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string) *Server {
+// Options carries the login brute-force protection settings into the admin
+// server. TrustedProxies is the parsed form of cfg.TrustedProxyCIDRs.
+type Options struct {
+	LoginRateLimit int
+	LoginWindow    time.Duration
+	LoginGlobalMax int
+	TrustedProxies []*net.IPNet
+}
+
+// NewServer builds the admin HTTP handler. mountDiagnostics mounts /metrics on
+// the admin port when no dedicated internal metrics listener is configured.
+// forceHTTPS sets the Secure flag on session cookies and emits HSTS — enable it
+// when TLS terminates in front (ingress) or in-process (autocert).
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, opts Options, mountDiagnostics bool, forceHTTPS bool) *Server {
 	sessions := NewSessionStore(24*time.Hour, lg)
 	a := &api{
-		auth:     adminAuth,
-		sessions: sessions,
-		stats:    collector,
-		users:    users,
-		ports:    ports,
-		logger:   lg,
+		auth:            adminAuth,
+		sessions:        sessions,
+		stats:           collector,
+		users:           users,
+		ports:           ports,
+		logger:          lg,
+		loginLimiter:    ratelimit.New(opts.LoginRateLimit, opts.LoginWindow),
+		trustedProxies:  opts.TrustedProxies,
+		globalFails:     newGlobalCounter(opts.LoginGlobalMax, opts.LoginWindow),
+		loginRetryAfter: strconv.Itoa(int(opts.LoginWindow.Seconds())),
+		secureCookies:   forceHTTPS,
 	}
 
 	mux := http.NewServeMux()
@@ -62,25 +83,34 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 		fmt.Fprintf(w, `{"version":%q}`, version)
 	})
 
-	// Prometheus metrics (no auth — standard for scraping)
-	mux.Handle("/metrics", m.Handler())
-
-	// pprof debug endpoints (no auth — admin port is internal-only)
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	// Prometheus /metrics is mounted on the admin port only when no dedicated
+	// internal metrics listener is configured (mountDiagnostics). Otherwise it is
+	// served on the internal listener (see cmd/evan-proxy/main.go). pprof is never
+	// mounted on the admin mux — it is opt-in on its own loopback listener.
+	if mountDiagnostics {
+		mux.Handle("/metrics", m.Handler())
+	}
 
 	// Pages
 	mux.HandleFunc("/login", serveFile("static/login.html"))
 	mux.HandleFunc("/", a.requireSessionPage(serveFile("static/index.html")))
 
-	return &Server{mux: mux}
+	return &Server{handler: securityHeaders(mux, forceHTTPS)}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
+}
+
+// RegisterPprof mounts the net/http/pprof debug endpoints on mux. These are
+// unauthenticated and expose process internals (argv, heap/CPU profiles), so
+// they belong on an internal-only listener — never the public admin host.
+func RegisterPprof(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 }
 
 func serveFile(name string) http.HandlerFunc {

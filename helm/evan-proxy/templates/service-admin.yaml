@@ -1,0 +1,21 @@
+{{- if .Values.ingress.enabled }}
+# Dedicated ClusterIP service for the admin UI. Gives the ingress a stable
+# backend for port {{ .Values.service.adminPort }} so admin can be reached over
+# TLS through the ingress without exposing the port on the public LoadBalancer
+# (see service.exposeAdmin).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "evan-proxy.fullname" . }}-admin
+  labels:
+    {{- include "evan-proxy.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: admin
+      port: {{ .Values.service.adminPort }}
+      targetPort: admin
+      protocol: TCP
+  selector:
+    {{- include "evan-proxy.selectorLabels" . | nindent 4 }}
+{{- end }}

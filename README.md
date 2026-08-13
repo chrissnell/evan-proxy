@@ -37,7 +37,7 @@ To make this work, follow this plan:
 - DNS-over-TLS (DoT) and DNS-over-HTTPS (DoH) support
 - DNS-level block detection (returns 523 for DNS-blocked domains)
 - Downtime schedules — set per-user internet access windows by day of week, with support for multiple windows per day and overnight spans; temporary overrides let you suspend downtime for 15 minutes to 12 hours without changing the schedule
-- Prometheus metrics endpoint (`/metrics`)
+- Prometheus metrics on a dedicated internal listener (kept off the public admin port)
 
 ## Configuration
 
@@ -62,6 +62,11 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 |----------|---------|-------------|
 | `PROXY_DB_PATH` | `/data/evan-proxy/users.db` | Path to SQLite user database |
 | `ADMIN_LISTEN` | `:9090` | Admin interface listen address |
+| `METRICS_LISTEN` | `127.0.0.1:9091` | Dedicated Prometheus metrics listen address. Empty string mounts `/metrics` on the admin port instead (legacy). |
+| `METRICS_USER_LABEL` | `false` | When `true`, include a per-user label on `evanproxy_requests_total`. This is PII (usernames) — leave off unless you accept exposing usernames to Prometheus. |
+| `FORCE_HTTPS` | `false` | Set the `Secure` flag on the admin session cookie and send HSTS. Enable when TLS terminates in front (ingress/LB) or via built-in autocert. Implied `true` when `AUTOCERT_HOST` is set. |
+| `AUTOCERT_HOST` | | Hostname to obtain a Let's Encrypt cert for and terminate TLS in-process (single-host deployments). Empty = no built-in TLS (terminate at ingress instead). |
+| `AUTOCERT_DIR` | `/data/evan-proxy/autocert` | Cert cache directory for autocert (persist this across restarts to avoid re-issuing). |
 | `DNS_SERVER` | | Custom DNS resolver (e.g. `1.1.1.1:53`), empty uses system default |
 | `DNS_PROTOCOL` | `plain` | DNS protocol: `plain`, `tls` (DoT), or `https` (DoH) |
 | `USER_PORT_MIN` | `8081` | First per-user dedicated proxy port |
@@ -70,8 +75,12 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `CONNECT_DIAL_TIMEOUT` | `10s` | Timeout for dialing target hosts |
 | `IDLE_TIMEOUT` | `300s` | TCP idle connection timeout |
 | `HTTP_TIMEOUT` | `30s` | HTTP response timeout |
-| `AUTH_FAIL_RATE_LIMIT` | `5` | Failed auth attempts before rate limiting kicks in |
-| `AUTH_FAIL_WINDOW` | `60s` | Sliding window for rate limiting |
+| `AUTH_FAIL_RATE_LIMIT` | `5` | Failed proxy auth attempts before rate limiting kicks in |
+| `AUTH_FAIL_WINDOW` | `60s` | Sliding window for proxy auth rate limiting |
+| `ADMIN_LOGIN_RATE_LIMIT` | `5` | Failed `/api/login` attempts per client IP before returning `429`. Only failures count, so repeated successful logins (iOS reauth) never trip it. |
+| `ADMIN_LOGIN_WINDOW` | `15m` | Sliding window for admin login rate limiting (per-IP and global) |
+| `ADMIN_LOGIN_GLOBAL_MAX` | `100` | Global failure ceiling across all IPs in the window; backstop against rotating-IP attacks on the single admin account (`0` = disabled) |
+| `TRUSTED_PROXY_CIDRS` | | Comma-separated CIDRs whose `X-Forwarded-For` is trusted for admin client-IP detection (e.g. your ingress/LB). Empty = trust none and use the peer address, which prevents header-spoofed rate-limit evasion. |
 | `LOG_FORMAT` | `human` | Log format: `json` or `human` |
 | `LOG_HEADERS` | `false` | When `true`, log per-request headers on the plain-HTTP forward path: inbound headers, which hop-by-hop headers were stripped, and the exact headers forwarded upstream. Diagnostic only — verbose, and credentials are redacted. HTTPS (`CONNECT`) traffic is an opaque TCP tunnel whose headers are never inspected or modified. |
 | `TZ` | | IANA timezone for downtime schedules (e.g. `America/Denver`) |
@@ -79,6 +88,20 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `PAC_PATH` | `/proxy.pac` | Request path the PAC is served at |
 | `PAC_PROXY_ENDPOINT` | | Proxy `host:port` the PAC hands back; empty = echo the request's own `Host` (works for NAT/port-forward with no per-user config) |
 | `PAC_BYPASS_DOMAINS` | `venmo.com,paypal.com,paypalobjects.com,braintreegateway.com,braintree-api.com` | Comma-separated domain suffixes routed `DIRECT` (bypassing the proxy) |
+| `PPROF_ENABLED` | `false` | When `true`, serve Go `pprof` profiling endpoints on a separate loopback listener (`PPROF_LISTEN`). Never served on the admin port. |
+| `PPROF_LISTEN` | `127.0.0.1:6060` | Listen address for the pprof endpoints when `PPROF_ENABLED=true`. Loopback-only by default — reach it with `kubectl port-forward`. |
+
+## Profiling (pprof)
+
+Profiling is **off by default** and is never exposed on the admin port. To collect a profile, enable it and reach the loopback listener from inside the pod:
+
+```bash
+PPROF_ENABLED=true   # optionally PPROF_LISTEN=127.0.0.1:6060
+kubectl port-forward deploy/evan-proxy 6060:6060
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+```
+
+Keep `PPROF_LISTEN` bound to loopback (`127.0.0.1`) so the profiling endpoints — which leak `cmdline`/heap dumps and allow CPU/memory-heavy profiles — are never reachable from the public network. If `PPROF_LISTEN` is set to a non-loopback address, evan-proxy still starts but logs a prominent warning that profiling is network-reachable.
 
 ## Excluding sites from the proxy (PAC)
 
@@ -112,6 +135,69 @@ timezone: "America/Denver"   # IANA timezone, e.g. America/Los_Angeles, US/Easte
 ```
 
 Without this, the container defaults to UTC and downtime windows won't match your local time.
+
+## Metrics
+
+Prometheus metrics are served at `/metrics` on a **dedicated internal listener**, separate from the admin port. By default that listener binds `127.0.0.1:9091` (`METRICS_LISTEN`), so metrics are never reachable on the public admin host. Setting `METRICS_LISTEN=""` falls back to mounting `/metrics` on the admin port (legacy behaviour).
+
+The per-user label on `evanproxy_requests_total` is **off by default** because usernames are PII. The metric is labelled only by `method` and `status_code` unless you set `METRICS_USER_LABEL=true`.
+
+The unauthenticated `net/http/pprof` debug endpoints (`/debug/pprof/*`) are **off by default** and are never mounted on this metrics listener or the admin port. Enable them with `PPROF_ENABLED=true`; they then bind only their own loopback listener `PPROF_LISTEN` (default `127.0.0.1:6060`) — see the pprof/profiling section above.
+
+In Kubernetes the pod binds the metrics listener on `0.0.0.0:9091` and exposes it **only** through an internal `ClusterIP` Service (`<release>-evan-proxy-metrics`) — never the public `LoadBalancer`. A NetworkPolicy rule restricts scraping to the namespace named by `metrics.scrapeNamespace` (default `monitoring`). Point Prometheus at that ClusterIP Service (e.g. a `ServiceMonitor` targeting the `metrics` port) rather than the proxy's public IP.
+## TLS for the admin interface
+
+The admin UI serves credentials and session cookies, so it should be reached over HTTPS on any deployment that isn't a plain-HTTP LAN box. Apple's App Transport Security also refuses plain HTTP and self-signed certs, so a remote iOS companion app needs a valid certificate regardless. Set `FORCE_HTTPS=true` whenever TLS is in front — it sets the `Secure` flag on the session cookie and sends HSTS. The proxy also always sends `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`.
+
+There are two supported ways to get a real cert.
+
+### Recipe 1 — Kubernetes ingress + cert-manager (recommended for the cluster)
+
+Terminate TLS at the ingress and let [cert-manager](https://cert-manager.io) issue and renew the certificate. The chart creates a dedicated `ClusterIP` service (`<release>-admin`) as the ingress backend, so the admin port need not be exposed on the public `LoadBalancer`:
+
+```yaml
+# values.yaml
+admin:
+  forceHTTPS: true          # Secure cookie + HSTS (TLS is in front)
+
+service:
+  exposeAdmin: false        # keep plaintext 9090 off the public LoadBalancer;
+                            # the per-user proxy ports stay exposed
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: proxy.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          servicePort: 9090
+  tls:
+    - secretName: evan-proxy-tls
+      hosts:
+        - proxy.example.com
+```
+
+The per-user proxy ports (`userPortMin`–`userPortMax`) remain on the `LoadBalancer` service — they are the product and must stay reachable. Only the admin port moves behind the ingress.
+
+> **Note:** With this hardening in place, the admin port no longer serves `/metrics` or `/debug/pprof/*` — metrics move to an internal listener (`METRICS_LISTEN`) and pprof is opt-in on its own loopback listener (`PPROF_ENABLED`/`PPROF_LISTEN`). `/api/login` is also rate-limited per client IP. Per-device token auth for the iOS app is tracked separately; until it lands, treat the admin credentials as the single factor guarding this ingress and keep it on a trusted network or behind a VPN if you want defense in depth.
+
+### Recipe 2 — Built-in autocert (single host, e.g. Raspberry Pi)
+
+For a single-host deployment with no ingress, the binary can obtain and renew a Let's Encrypt certificate itself — no manual cert files:
+
+```bash
+export ADMIN_USER=admin
+export ADMIN_PASSWORD='<bcrypt-hash>'
+export AUTOCERT_HOST=proxy.example.com          # public DNS name pointing at this host
+export AUTOCERT_DIR=/data/evan-proxy/autocert   # persist across restarts
+./evan-proxy
+```
+
+With `AUTOCERT_HOST` set, HTTPS is served on the standard port `:443` (so it matches the ACME handler's HTTP→HTTPS redirect and what iOS/ATS expects) — `ADMIN_LISTEN` is not used in this mode. The host must be reachable from the internet on port `80` (ACME `http-01` challenge; also redirects to HTTPS) and `443`. Binding `:80`/`:443` requires root or the `CAP_NET_BIND_SERVICE` capability (`sudo setcap 'cap_net_bind_service=+ep' ./evan-proxy`); NAT/port-forward setups can instead forward external `80`/`443` to this host. Setting `AUTOCERT_HOST` implies `FORCE_HTTPS=true`. Persist `AUTOCERT_DIR` so certs survive restarts and you don't hit Let's Encrypt rate limits.
 
 ## Building
 
@@ -155,9 +241,18 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `proxy.dnsProtocol` | string | `""` | DNS protocol: `plain`, `tls`, or `https` (empty = plain) |
 | `proxy.userPortMin` | int | `8080` | First per-user dedicated proxy port |
 | `proxy.userPortMax` | int | `8090` | Last per-user dedicated proxy port |
+| `metrics.listen` | string | `"0.0.0.0:9091"` | In-pod metrics listen address (bind `0.0.0.0` so the ClusterIP Service can reach it) |
+| `metrics.port` | int | `9091` | Port for the internal metrics ClusterIP Service |
+| `metrics.userLabel` | bool | `false` | Include the per-user (PII) label on request metrics |
+| `metrics.scrapeNamespace` | string | `"monitoring"` | Namespace allowed to scrape metrics by the NetworkPolicy |
 | `admin.listen` | string | `":9090"` | Admin interface listen address |
 | `admin.user` | string | `"admin"` | Admin username |
 | `admin.passwordHash` | string | `"$2y$10$CHANGEME"` | Admin password as bcrypt hash |
+| `admin.loginRateLimit` | int | `5` | Failed `/api/login` attempts per client IP before `429` |
+| `admin.loginWindow` | string | `"15m"` | Sliding window for admin login rate limiting |
+| `admin.loginGlobalMax` | int | `100` | Global failure ceiling across all IPs (`0` = disabled) |
+| `admin.trustedProxyCIDRs` | list | `[]` | CIDRs whose `X-Forwarded-For` is trusted for client-IP detection; empty = trust none |
+| `admin.forceHTTPS` | bool | `false` | Set `Secure` session cookie + HSTS. Enable when TLS is in front (ingress/LB) |
 | `existingSecret` | string | `""` | Use a pre-created Secret instead of generating one. Must contain keys: `ADMIN_USER`, `ADMIN_PASSWORD` |
 | `persistence.enabled` | bool | `true` | Enable persistent storage for SQLite database |
 | `persistence.size` | string | `"1Gi"` | PVC size |
@@ -166,9 +261,12 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `service.loadBalancerIP` | string | `""` | Static IP from MetalLB pool |
 | `service.annotations` | object | `{}` | Service annotations |
 | `service.adminPort` | int | `9090` | Service port for admin interface |
-| `ingress.enabled` | bool | `false` | Enable ingress (e.g. for admin UI) |
+| `service.exposeAdmin` | bool | `true` | Expose the admin port on the `LoadBalancer`. Set `false` and use the ingress for internet-facing deployments |
+| `ingress.enabled` | bool | `false` | Enable ingress for the admin UI (creates a `ClusterIP` backend service) |
 | `ingress.className` | string | `""` | Ingress class name |
+| `ingress.annotations` | object | `{}` | Ingress annotations (e.g. `cert-manager.io/cluster-issuer`) |
 | `ingress.hosts` | list | | Ingress host rules |
+| `ingress.tls` | list | `[]` | Ingress TLS blocks (`secretName` + `hosts`) |
 | `resources.requests.cpu` | string | `"100m"` | CPU request |
 | `resources.requests.memory` | string | `"64Mi"` | Memory request |
 | `resources.limits.cpu` | string | `"1000m"` | CPU limit |

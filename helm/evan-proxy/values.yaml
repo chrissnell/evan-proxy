@@ -55,11 +55,36 @@ pac:
   # (venmo.com, paypal.com, paypalobjects.com, braintreegateway.com, braintree-api.com).
   bypassDomains: []
 
+# Debug endpoints — opt-in pprof profiling.
+# Never served on the public admin port. When enabled, pprof binds a separate
+# loopback listener (`pprofListen`), reachable only from inside the pod via
+# `kubectl port-forward`. Leave disabled in normal operation.
+debug:
+  pprofEnabled: false
+  pprofListen: "127.0.0.1:6060"
+
 # Persistent storage for SQLite user database
 persistence:
   enabled: true
   size: 1Gi
   storageClass: ""  # empty = default StorageClass
+
+# Prometheus metrics — served on a dedicated internal listener, never on the
+# public admin LoadBalancer. Inside the pod it binds 0.0.0.0 so an in-cluster
+# scraper can reach it, but it is exposed only through an internal ClusterIP
+# Service guarded by a NetworkPolicy limited to the monitoring namespace.
+metrics:
+  # Listen address inside the pod. Bind 0.0.0.0 so the ClusterIP Service can
+  # reach it; NetworkPolicy restricts who may actually connect.
+  listen: "0.0.0.0:9091"
+  # Include the per-user label on request metrics. This is PII (the children's
+  # usernames) — keep false unless you accept exposing usernames to Prometheus.
+  userLabel: false
+  # Port the internal metrics ClusterIP Service listens on.
+  port: 9091
+  # Kubernetes namespace running Prometheus; the NetworkPolicy allows metrics
+  # scrapes only from pods in this namespace.
+  scrapeNamespace: "monitoring"
 
 # Admin interface
 admin:
@@ -68,6 +93,20 @@ admin:
   # bcrypt hash of admin password
   # generate with: htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
   passwordHash: "$2y$10$CHANGEME"
+  # Login brute-force protection for /api/login. Only failed attempts count, so
+  # a device that keeps logging in successfully (iOS reauth) never trips it.
+  loginRateLimit: 5      # per-IP failures allowed within loginWindow
+  loginWindow: "15m"     # sliding window for per-IP and global failures
+  loginGlobalMax: 100    # global failure ceiling across all IPs (0 = disabled)
+  # CIDRs whose X-Forwarded-For header is trusted (your ingress/LB). When empty,
+  # XFF is ignored and the immediate peer address is used — safe default that
+  # prevents header-spoofed rate-limit evasion.
+  trustedProxyCIDRs: []
+  # Set true when TLS terminates in front of the pod (ingress below, or an
+  # external LB). Sets the Secure flag on the session cookie and sends HSTS.
+  # Leave false only for plain-HTTP local access. Apple ATS (the iOS app)
+  # requires HTTPS, so any remote deployment must set this true.
+  forceHTTPS: false
 
 # Use an existing secret instead of creating one
 # Secret must contain: ADMIN_USER, ADMIN_PASSWORD
@@ -80,6 +119,11 @@ service:
   loadBalancerIP: ""
   annotations: {}
   adminPort: 9090
+  # Expose the admin port (9090) on this Service. The per-user proxy ports are
+  # always exposed (they are the product). For any internet-facing deployment,
+  # set this false and reach the admin UI through the TLS ingress below (or a
+  # private LB) instead of exposing plaintext admin on the public LoadBalancer.
+  exposeAdmin: true
 
 # Resources
 resources:
@@ -96,17 +140,28 @@ networkPolicy:
   # Allow CONNECT tunnels to reach any port (not just 80/443)
   allowAllEgress: true
 
-# Ingress (e.g. for admin UI)
+# Ingress for the admin UI. When enabled, a dedicated ClusterIP service
+# (<release>-admin) is created as the ingress backend, so the admin port need
+# not be exposed on the public LoadBalancer (set service.exposeAdmin: false).
+# Terminate TLS here and set admin.forceHTTPS: true.
 ingress:
   enabled: false
   className: ""
+  # cert-manager issues and renews the TLS cert automatically. Example:
   annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
   hosts:
     - host: proxy.example.com
       paths:
         - path: /
           pathType: ImplementationSpecific
           servicePort: 9090
+  # TLS termination at the ingress. cert-manager fills secretName from the
+  # annotation above; or supply a pre-created secret. Example:
+  tls: []
+    # - secretName: evan-proxy-tls
+    #   hosts:
+    #     - proxy.example.com
 
 # Timezone for downtime schedule evaluation (IANA format)
 # e.g. "America/Denver", "America/Los_Angeles", "US/Eastern"

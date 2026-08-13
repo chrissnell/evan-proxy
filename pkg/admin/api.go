@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"evan-proxy/pkg/auth"
 	edns "evan-proxy/pkg/dns"
 	"evan-proxy/pkg/logging"
+	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
 )
@@ -26,12 +28,17 @@ type PortManager interface {
 }
 
 type api struct {
-	auth     *auth.AdminAuth
-	sessions *SessionStore
-	stats    *stats.Collector
-	users    *userdb.DB
-	ports    PortManager
-	logger   *logging.Logger
+	auth            *auth.AdminAuth
+	sessions        *SessionStore
+	stats           *stats.Collector
+	users           *userdb.DB
+	ports           PortManager
+	logger          *logging.Logger
+	loginLimiter    *ratelimit.Limiter
+	trustedProxies  []*net.IPNet
+	globalFails     *globalCounter // shared global failure ceiling
+	loginRetryAfter string         // Retry-After header value (seconds) for 429s
+	secureCookies   bool
 }
 
 type loginRequest struct {
@@ -45,36 +52,35 @@ func (a *api) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Gate the attempt on the per-IP sliding-window limiter and the global
+	// failure ceiling before doing any work. Only failures are recorded, so a
+	// device that keeps logging in successfully (the iOS reauth path) never
+	// trips the limiter.
+	ip := clientIP(r, a.trustedProxies)
+	if !a.loginLimiter.Allow(ip) || !a.globalFails.allow() {
+		if a.loginRetryAfter != "" {
+			w.Header().Set("Retry-After", a.loginRetryAfter)
+		}
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
+
 	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<10)).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	// Floor response time at 200ms to prevent timing attacks
-	start := time.Now()
-	defer func() {
-		elapsed := time.Since(start)
-		if elapsed < 200*time.Millisecond {
-			time.Sleep(200*time.Millisecond - elapsed)
-		}
-	}()
-
 	if err := a.auth.Check(req.Username, req.Password); err != nil {
-		a.logger.Errorf("admin", "login failed from %s: %v", r.RemoteAddr, err)
+		a.loginLimiter.RecordFailure(ip)
+		a.globalFails.record()
+		a.logger.Errorf("admin", "login failed from %s: %v", ip, err)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 
 	token := a.sessions.Create()
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   86400,
-	})
+	http.SetCookie(w, sessionCookieFor(token, a.secureCookies))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -87,14 +93,7 @@ func (a *api) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		a.sessions.Delete(c.Value)
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   -1,
-	})
+	http.SetCookie(w, clearedSessionCookie(a.secureCookies))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -464,7 +463,7 @@ func (a *api) handleTestDNS(w http.ResponseWriter, r *http.Request) {
 }
 
 type downtimeRequest struct {
-	Username         string                 `json:"username"`
+	Username         string                  `json:"username"`
 	DowntimeSchedule userdb.DowntimeSchedule `json:"downtime_schedule"`
 }
 
