@@ -97,6 +97,11 @@ func main() {
 			Cache:      autocert.DirCache(cfg.AutocertDir),
 		}
 		adminSrv.TLSConfig = mgr.TLSConfig()
+		// Serve HTTPS on the standard port so it matches the :80 ACME handler's
+		// HTTP->HTTPS redirect (which targets :443) and what iOS/ATS expects.
+		// Binding :443 needs root or CAP_NET_BIND_SERVICE; NAT/port-forward
+		// setups can forward external 443 to this host instead.
+		adminSrv.Addr = ":443"
 
 		// :80 serves the ACME http-01 challenge and redirects everything else
 		// to HTTPS.
@@ -106,10 +111,14 @@ func main() {
 				logger.Fatalf("admin", "acme http: %v", err)
 			}
 		}()
-		defer challengeSrv.Shutdown(context.Background())
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			challengeSrv.Shutdown(ctx)
+		}()
 
 		go func() {
-			logger.Infof("admin", "listening with autocert TLS for %s on %s", cfg.AutocertHost, cfg.AdminListen)
+			logger.Infof("admin", "listening with autocert TLS for %s on %s", cfg.AutocertHost, adminSrv.Addr)
 			if err := adminSrv.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
 				logger.Fatalf("admin", "tls: %v", err)
 			}

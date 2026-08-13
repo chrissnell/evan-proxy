@@ -154,6 +154,8 @@ ingress:
 
 The per-user proxy ports (`userPortMin`–`userPortMax`) remain on the `LoadBalancer` service — they are the product and must stay reachable. Only the admin port moves behind the ingress.
 
+> **Do not expose this ingress to the public internet yet.** The admin port also serves `/metrics` and `/debug/pprof/*` with **no authentication** (they were designed for an internal-only port). Those are locked down in the sibling hardening phases (opt-in `/debug/pprof` and `/metrics` auth); until those land, restrict the ingress to a trusted network, or block `/debug/` and `/metrics` at the ingress (e.g. an `nginx.ingress.kubernetes.io/server-snippet` returning 403 for those prefixes).
+
 ### Recipe 2 — Built-in autocert (single host, e.g. Raspberry Pi)
 
 For a single-host deployment with no ingress, the binary can obtain and renew a Let's Encrypt certificate itself — no manual cert files:
@@ -166,7 +168,7 @@ export AUTOCERT_DIR=/data/evan-proxy/autocert   # persist across restarts
 ./evan-proxy
 ```
 
-The host must be reachable from the internet on port `80` (ACME `http-01` challenge; also redirects to HTTPS) and on the admin port for HTTPS. Setting `AUTOCERT_HOST` implies `FORCE_HTTPS=true`. Persist `AUTOCERT_DIR` so certs survive restarts and you don't hit Let's Encrypt rate limits.
+With `AUTOCERT_HOST` set, HTTPS is served on the standard port `:443` (so it matches the ACME handler's HTTP→HTTPS redirect and what iOS/ATS expects) — `ADMIN_LISTEN` is not used in this mode. The host must be reachable from the internet on port `80` (ACME `http-01` challenge; also redirects to HTTPS) and `443`. Binding `:80`/`:443` requires root or the `CAP_NET_BIND_SERVICE` capability (`sudo setcap 'cap_net_bind_service=+ep' ./evan-proxy`); NAT/port-forward setups can instead forward external `80`/`443` to this host. Setting `AUTOCERT_HOST` implies `FORCE_HTTPS=true`. Persist `AUTOCERT_DIR` so certs survive restarts and you don't hit Let's Encrypt rate limits.
 
 ## Building
 
