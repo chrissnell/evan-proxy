@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"net/http/pprof"
 	"time"
 
 	"evan-proxy/pkg/auth"
@@ -64,13 +63,6 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 
 	// Prometheus metrics (no auth — standard for scraping)
 	mux.Handle("/metrics", m.Handler())
-
-	// pprof debug endpoints (no auth — admin port is internal-only)
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	// Pages
 	mux.HandleFunc("/login", serveFile("static/login.html"))

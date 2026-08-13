@@ -62,6 +62,12 @@ type Config struct {
 	PACPath          string   // request path the PAC is served at (default "/proxy.pac")
 	PACProxyEndpoint string   // proxy "host:port" the PAC returns; empty = echo request Host
 	PACBypassDomains []string // domain suffixes routed DIRECT (bypass proxy)
+
+	// pprof profiling endpoints. Never served on the public admin port. When
+	// enabled they bind a separate loopback listener (PProfListen), reachable
+	// only via `kubectl port-forward`. Off by default.
+	PProfEnabled bool
+	PProfListen  string // "host:port" — default "127.0.0.1:6060" (loopback only)
 }
 
 func Load() (*Config, error) {
@@ -91,6 +97,8 @@ func Load() (*Config, error) {
 		PACProxyEndpoint:    os.Getenv("PAC_PROXY_ENDPOINT"),
 		PACBypassDomains: envCSV("PAC_BYPASS_DOMAINS",
 			[]string{"venmo.com", "paypal.com", "paypalobjects.com", "braintreegateway.com", "braintree-api.com"}),
+		PProfEnabled: envBool("PPROF_ENABLED", false),
+		PProfListen:  envOr("PPROF_LISTEN", "127.0.0.1:6060"),
 	}
 
 	if err := cfg.validate(); err != nil {

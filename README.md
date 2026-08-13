@@ -79,6 +79,20 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `PAC_PATH` | `/proxy.pac` | Request path the PAC is served at |
 | `PAC_PROXY_ENDPOINT` | | Proxy `host:port` the PAC hands back; empty = echo the request's own `Host` (works for NAT/port-forward with no per-user config) |
 | `PAC_BYPASS_DOMAINS` | `venmo.com,paypal.com,paypalobjects.com,braintreegateway.com,braintree-api.com` | Comma-separated domain suffixes routed `DIRECT` (bypassing the proxy) |
+| `PPROF_ENABLED` | `false` | When `true`, serve Go `pprof` profiling endpoints on a separate loopback listener (`PPROF_LISTEN`). Never served on the admin port. |
+| `PPROF_LISTEN` | `127.0.0.1:6060` | Listen address for the pprof endpoints when `PPROF_ENABLED=true`. Loopback-only by default — reach it with `kubectl port-forward`. |
+
+## Profiling (pprof)
+
+Profiling is **off by default** and is never exposed on the admin port. To collect a profile, enable it and reach the loopback listener from inside the pod:
+
+```bash
+PPROF_ENABLED=true   # optionally PPROF_LISTEN=127.0.0.1:6060
+kubectl port-forward deploy/evan-proxy 6060:6060
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+```
+
+Keep `PPROF_LISTEN` bound to loopback (`127.0.0.1`) so the profiling endpoints — which leak `cmdline`/heap dumps and allow CPU/memory-heavy profiles — are never reachable from the public network.
 
 ## Excluding sites from the proxy (PAC)
 

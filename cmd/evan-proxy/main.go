@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -92,6 +93,23 @@ func main() {
 			logger.Fatalf("admin", "%v", err)
 		}
 	}()
+
+	// Optional pprof profiling on a separate loopback listener (never the public
+	// admin port). Reach it via `kubectl port-forward`.
+	if cfg.PProfEnabled {
+		pmux := http.NewServeMux()
+		pmux.HandleFunc("/debug/pprof/", pprof.Index)
+		pmux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		pmux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		pmux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		pmux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		go func() {
+			logger.Infof("pprof", "listening on %s", cfg.PProfListen)
+			if err := http.ListenAndServe(cfg.PProfListen, pmux); err != nil {
+				logger.Errorf("pprof", "%v", err)
+			}
+		}()
+	}
 
 	// Graceful shutdown
 	sig := make(chan os.Signal, 1)

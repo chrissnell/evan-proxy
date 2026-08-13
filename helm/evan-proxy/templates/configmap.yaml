@@ -46,6 +46,11 @@ data:
   PAC_BYPASS_DOMAINS: {{ join "," .Values.pac.bypassDomains | quote }}
   {{- end }}
   {{- end }}
+  {{- if .Values.debug.pprofEnabled }}
+  # pprof profiling — bound to a loopback listener only, never the admin port
+  PPROF_ENABLED: "true"
+  PPROF_LISTEN: {{ .Values.debug.pprofListen | quote }}
+  {{- end }}
   {{- if .Values.timezone }}
   TZ: {{ .Values.timezone | quote }}
   {{- end }}
