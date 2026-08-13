@@ -1,0 +1,169 @@
+package admin
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"evan-proxy/pkg/userdb"
+)
+
+// sessionRequest builds a request carrying a valid admin session cookie.
+func sessionRequest(a *api, method, target string, body string) *http.Request {
+	var r *http.Request
+	if body == "" {
+		r = httptest.NewRequest(method, target, nil)
+	} else {
+		r = httptest.NewRequest(method, target, strings.NewReader(body))
+	}
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: a.sessions.Create()})
+	return r
+}
+
+func TestEnroll_RequiresAuth(t *testing.T) {
+	a := setupAPI(t)
+	w := httptest.NewRecorder()
+	a.requireSession(a.handleEnroll)(w, httptest.NewRequest(http.MethodPost, "/api/devices/enroll", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated enroll: want 401, got %d", w.Code)
+	}
+}
+
+func TestEnrollPairAndBearerAuth(t *testing.T) {
+	a := setupAPI(t)
+
+	// Admin creates an enrollment code.
+	w := httptest.NewRecorder()
+	a.requireSession(a.handleEnroll)(w, sessionRequest(a, http.MethodPost, "/api/devices/enroll", ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("enroll: want 200, got %d", w.Code)
+	}
+	var enr struct {
+		Code      string `json:"code"`
+		PairURL   string `json:"pair_url"`
+		ExpiresIn int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&enr); err != nil {
+		t.Fatal(err)
+	}
+	if enr.Code == "" || enr.ExpiresIn <= 0 {
+		t.Fatalf("incomplete enroll response: %+v", enr)
+	}
+	if !strings.HasPrefix(enr.PairURL, "evanproxy://pair?") || !strings.Contains(enr.PairURL, "code="+enr.Code) {
+		t.Fatalf("bad pair_url: %q", enr.PairURL)
+	}
+
+	// The device redeems the code for a bearer token — no session.
+	w = httptest.NewRecorder()
+	a.handlePair(w, httptest.NewRequest(http.MethodPost, "/api/pair",
+		strings.NewReader(`{"code":"`+enr.Code+`","device_name":"Chris's iPhone"}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("pair: want 200, got %d", w.Code)
+	}
+	var pair struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&pair); err != nil {
+		t.Fatal(err)
+	}
+	if pair.Token == "" {
+		t.Fatal("empty token")
+	}
+
+	// The code is single-use.
+	w = httptest.NewRecorder()
+	a.handlePair(w, httptest.NewRequest(http.MethodPost, "/api/pair",
+		strings.NewReader(`{"code":"`+enr.Code+`"}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("code reuse: want 401, got %d", w.Code)
+	}
+
+	// The bearer token authenticates a protected endpoint without a cookie.
+	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	req.Header.Set("Authorization", "Bearer "+pair.Token)
+	w = httptest.NewRecorder()
+	a.requireSession(a.handleUsers)(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("bearer /api/users: want 200, got %d", w.Code)
+	}
+
+	// The device shows up in the list.
+	w = httptest.NewRecorder()
+	a.requireSession(a.handleDevices)(w, sessionRequest(a, http.MethodGet, "/api/devices", ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list devices: want 200, got %d", w.Code)
+	}
+	var devices []userdb.DeviceToken
+	if err := json.NewDecoder(w.Body).Decode(&devices); err != nil {
+		t.Fatal(err)
+	}
+	if len(devices) != 1 || devices[0].Name != "Chris's iPhone" {
+		t.Fatalf("unexpected device list: %+v", devices)
+	}
+
+	// Revoking the device kills the bearer token.
+	w = httptest.NewRecorder()
+	a.requireSession(a.handleDevices)(w, sessionRequest(a, http.MethodDelete, "/api/devices?id="+devices[0].ID, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("revoke: want 200, got %d", w.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	req.Header.Set("Authorization", "Bearer "+pair.Token)
+	w = httptest.NewRecorder()
+	a.requireSession(a.handleUsers)(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked bearer: want 401, got %d", w.Code)
+	}
+}
+
+func TestPair_BadCode(t *testing.T) {
+	a := setupAPI(t)
+	w := httptest.NewRecorder()
+	a.handlePair(w, httptest.NewRequest(http.MethodPost, "/api/pair", strings.NewReader(`{"code":"bogus"}`)))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("bad code: want 401, got %d", w.Code)
+	}
+}
+
+func TestRevokeDevice_Unknown(t *testing.T) {
+	a := setupAPI(t)
+	w := httptest.NewRecorder()
+	a.requireSession(a.handleDevices)(w, sessionRequest(a, http.MethodDelete, "/api/devices?id=nope", ""))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unknown device: want 404, got %d", w.Code)
+	}
+}
+
+func TestEnrollQR(t *testing.T) {
+	a := setupAPI(t)
+
+	w := httptest.NewRecorder()
+	a.requireSession(a.handleEnroll)(w, sessionRequest(a, http.MethodPost, "/api/devices/enroll", ""))
+	var enr struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&enr); err != nil {
+		t.Fatal(err)
+	}
+
+	w = httptest.NewRecorder()
+	a.requireSession(a.handleEnroll)(w, sessionRequest(a, http.MethodGet, "/api/devices/enroll?code="+enr.Code, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("QR: want 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "image/svg+xml" {
+		t.Fatalf("QR content type: %q", ct)
+	}
+	if !strings.Contains(w.Body.String(), "<svg") {
+		t.Fatal("QR body is not SVG")
+	}
+
+	// An unknown code must not render a QR.
+	w = httptest.NewRecorder()
+	a.requireSession(a.handleEnroll)(w, sessionRequest(a, http.MethodGet, "/api/devices/enroll?code=bogus", ""))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("bogus QR code: want 404, got %d", w.Code)
+	}
+}

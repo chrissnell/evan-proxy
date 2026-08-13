@@ -39,6 +39,7 @@ type api struct {
 	globalFails     *globalCounter // shared global failure ceiling
 	loginRetryAfter string         // Retry-After header value (seconds) for 429s
 	secureCookies   bool
+	enroll          *enrollStore // single-use device enrollment codes
 }
 
 type loginRequest struct {
@@ -97,11 +98,25 @@ func (a *api) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// requireSession wraps a handler with session authentication.
+// authed reports whether the request carries a valid session cookie (browser)
+// or a valid device bearer token (paired app).
+func (a *api) authed(r *http.Request) bool {
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		if _, ok := a.users.ValidateDeviceToken(strings.TrimPrefix(h, "Bearer ")); ok {
+			return true
+		}
+	}
+	if c, err := r.Cookie(sessionCookie); err == nil && a.sessions.Validate(c.Value) {
+		return true
+	}
+	return false
+}
+
+// requireSession wraps a handler with authentication: session cookie or
+// device bearer token.
 func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie(sessionCookie)
-		if err != nil || !a.sessions.Validate(c.Value) {
+		if !a.authed(r) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}

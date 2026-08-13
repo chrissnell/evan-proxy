@@ -53,6 +53,7 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 		globalFails:     newGlobalCounter(opts.LoginGlobalMax, opts.LoginWindow),
 		loginRetryAfter: strconv.Itoa(int(opts.LoginWindow.Seconds())),
 		secureCookies:   forceHTTPS,
+		enroll:          newEnrollStore(5 * time.Minute),
 	}
 
 	mux := http.NewServeMux()
@@ -76,6 +77,12 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 	mux.HandleFunc("/api/users/enabled", a.requireSession(a.handleSetEnabled))
 	mux.HandleFunc("/api/users/downtime", a.requireSession(a.handleUpdateDowntime))
 	mux.HandleFunc("/api/users/downtime-override", a.requireSession(a.handleDowntimeOverride))
+
+	// Device pairing: enroll/list/revoke are admin-only; /api/pair is public
+	// but gated by the single-use enrollment code.
+	mux.HandleFunc("/api/devices/enroll", a.requireSession(a.handleEnroll))
+	mux.HandleFunc("/api/devices", a.requireSession(a.handleDevices))
+	mux.HandleFunc("/api/pair", a.handlePair)
 
 	// Version (no auth)
 	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
