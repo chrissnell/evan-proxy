@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"evan-proxy/pkg/auth"
@@ -52,6 +53,11 @@ func TestServer_PprofNotExposed(t *testing.T) {
 		if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/login" {
 			t.Fatalf("pprof must not be served on admin mux; %s got %d (Location=%q), want 303 -> /login",
 				path, w.Code, w.Header().Get("Location"))
+		}
+		// Belt and suspenders: the response must not be the pprof handler's
+		// output, independent of how the catch-all page happens to respond.
+		if body := w.Body.String(); strings.Contains(body, "Types of profiles available") {
+			t.Fatalf("pprof handler output leaked on admin mux at %s", path)
 		}
 	}
 }

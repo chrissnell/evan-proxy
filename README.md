@@ -92,7 +92,7 @@ kubectl port-forward deploy/evan-proxy 6060:6060
 go tool pprof http://127.0.0.1:6060/debug/pprof/heap
 ```
 
-Keep `PPROF_LISTEN` bound to loopback (`127.0.0.1`) so the profiling endpoints — which leak `cmdline`/heap dumps and allow CPU/memory-heavy profiles — are never reachable from the public network.
+Keep `PPROF_LISTEN` bound to loopback (`127.0.0.1`) so the profiling endpoints — which leak `cmdline`/heap dumps and allow CPU/memory-heavy profiles — are never reachable from the public network. If `PPROF_LISTEN` is set to a non-loopback address, evan-proxy still starts but logs a prominent warning that profiling is network-reachable.
 
 ## Excluding sites from the proxy (PAC)
 
