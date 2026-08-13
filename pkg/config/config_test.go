@@ -196,5 +196,23 @@ func TestLoadInvalidTrustedProxyCIDR(t *testing.T) {
 	}
 }
 
+func TestLoadInvalidAdminLoginRateLimit(t *testing.T) {
+	env := validEnv()
+	env["ADMIN_LOGIN_RATE_LIMIT"] = "0"
+	setEnv(t, env)
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for ADMIN_LOGIN_RATE_LIMIT=0 (would lock out admin)")
+	}
+}
+
+func TestLoadInvalidAdminLoginWindow(t *testing.T) {
+	env := validEnv()
+	env["ADMIN_LOGIN_WINDOW"] = "0s"
+	setEnv(t, env)
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for ADMIN_LOGIN_WINDOW=0 (would panic time.NewTicker)")
+	}
+}
+
 // Suppress unused import warning
 var _ = os.Getenv

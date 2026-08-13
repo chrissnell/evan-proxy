@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -48,12 +49,13 @@ func setupAPI(t *testing.T) *api {
 	t.Cleanup(func() { limiter.Stop() })
 
 	return &api{
-		auth:         auth.NewAdminAuth("admin", mustBcrypt(t, "correct-horse")),
-		sessions:     sessions,
-		users:        users,
-		logger:       lg,
-		loginLimiter: limiter,
-		globalFails:  newGlobalCounter(100, time.Minute),
+		auth:            auth.NewAdminAuth("admin", mustBcrypt(t, "correct-horse")),
+		sessions:        sessions,
+		users:           users,
+		logger:          lg,
+		loginLimiter:    limiter,
+		globalFails:     newGlobalCounter(100, time.Minute),
+		loginRetryAfter: "60",
 	}
 }
 
@@ -100,6 +102,97 @@ func TestHandleLogin_FreshIPSucceeds(t *testing.T) {
 	}
 	if len(w.Result().Cookies()) == 0 {
 		t.Fatal("expected a session cookie to be set")
+	}
+}
+
+func TestHandleLogin_GlobalCeilingTrips(t *testing.T) {
+	a := setupAPI(t)
+	// Tight global ceiling; per-IP limiter is generous so only the global
+	// ceiling can be the thing that trips.
+	a.loginLimiter = ratelimit.New(1000, time.Minute)
+	t.Cleanup(func() { a.loginLimiter.Stop() })
+	a.globalFails = newGlobalCounter(3, time.Minute)
+
+	// Three failures from rotating IPs exhaust the global ceiling.
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/login",
+			strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		req.RemoteAddr = fmt.Sprintf("203.0.113.%d:1111", i+1)
+		w := httptest.NewRecorder()
+		a.handleLogin(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: want 401, got %d", i, w.Code)
+		}
+	}
+	// A brand-new IP with the correct password is now blocked by the ceiling.
+	req := httptest.NewRequest(http.MethodPost, "/api/login",
+		strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+	req.RemoteAddr = "198.51.100.9:2222"
+	w := httptest.NewRecorder()
+	a.handleLogin(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("want 429 from global ceiling, got %d", w.Code)
+	}
+}
+
+func TestHandleLogin_TrustedProxyKeysOnForwardedIP(t *testing.T) {
+	a := setupAPI(t)
+	a.trustedProxies = []*net.IPNet{mustCIDR("10.0.0.0/8")}
+
+	// All requests share the same trusted peer but forward distinct clients.
+	// Exhaust the limiter for one forwarded client (limit is 3).
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/login",
+			strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		req.RemoteAddr = "10.0.0.5:5555"
+		req.Header.Set("X-Forwarded-For", "203.0.113.50")
+		w := httptest.NewRecorder()
+		a.handleLogin(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: want 401, got %d", i, w.Code)
+		}
+	}
+	// Same trusted peer, but a different forwarded client still gets through.
+	req := httptest.NewRequest(http.MethodPost, "/api/login",
+		strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+	req.RemoteAddr = "10.0.0.5:5555"
+	req.Header.Set("X-Forwarded-For", "203.0.113.51")
+	w := httptest.NewRecorder()
+	a.handleLogin(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("distinct forwarded client want 200, got %d", w.Code)
+	}
+
+	// The exhausted forwarded client is blocked even with the right password.
+	req = httptest.NewRequest(http.MethodPost, "/api/login",
+		strings.NewReader(`{"username":"admin","password":"correct-horse"}`))
+	req.RemoteAddr = "10.0.0.5:5555"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50")
+	w = httptest.NewRecorder()
+	a.handleLogin(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("exhausted forwarded client want 429, got %d", w.Code)
+	}
+}
+
+func TestHandleLogin_429SetsRetryAfter(t *testing.T) {
+	a := setupAPI(t)
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/login",
+			strings.NewReader(`{"username":"admin","password":"wrong"}`))
+		req.RemoteAddr = "203.0.113.7:1111"
+		a.handleLogin(httptest.NewRecorder(), req)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/login",
+		strings.NewReader(`{"username":"admin","password":"wrong"}`))
+	req.RemoteAddr = "203.0.113.7:1111"
+	w := httptest.NewRecorder()
+	a.handleLogin(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("want 429, got %d", w.Code)
+	}
+	if got := w.Header().Get("Retry-After"); got != "60" {
+		t.Fatalf("Retry-After = %q, want 60", got)
 	}
 }
 

@@ -28,15 +28,16 @@ type PortManager interface {
 }
 
 type api struct {
-	auth           *auth.AdminAuth
-	sessions       *SessionStore
-	stats          *stats.Collector
-	users          *userdb.DB
-	ports          PortManager
-	logger         *logging.Logger
-	loginLimiter   *ratelimit.Limiter
-	trustedProxies []*net.IPNet
-	globalFails    *globalCounter // shared global failure ceiling
+	auth            *auth.AdminAuth
+	sessions        *SessionStore
+	stats           *stats.Collector
+	users           *userdb.DB
+	ports           PortManager
+	logger          *logging.Logger
+	loginLimiter    *ratelimit.Limiter
+	trustedProxies  []*net.IPNet
+	globalFails     *globalCounter // shared global failure ceiling
+	loginRetryAfter string         // Retry-After header value (seconds) for 429s
 }
 
 type loginRequest struct {
@@ -56,7 +57,9 @@ func (a *api) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// trips the limiter.
 	ip := clientIP(r, a.trustedProxies)
 	if !a.loginLimiter.Allow(ip) || !a.globalFails.allow() {
-		w.Header().Set("Retry-After", "900")
+		if a.loginRetryAfter != "" {
+			w.Header().Set("Retry-After", a.loginRetryAfter)
+		}
 		w.WriteHeader(http.StatusTooManyRequests)
 		return
 	}
@@ -473,7 +476,7 @@ func (a *api) handleTestDNS(w http.ResponseWriter, r *http.Request) {
 }
 
 type downtimeRequest struct {
-	Username         string                 `json:"username"`
+	Username         string                  `json:"username"`
 	DowntimeSchedule userdb.DowntimeSchedule `json:"downtime_schedule"`
 }
 

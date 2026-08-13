@@ -150,6 +150,12 @@ func (c *Config) validate() error {
 			return fmt.Errorf("TRUSTED_PROXY_CIDRS entry %q is not a valid CIDR: %w", cidr, err)
 		}
 	}
+	if c.AdminLoginRateLimit < 1 {
+		return fmt.Errorf("ADMIN_LOGIN_RATE_LIMIT must be >= 1, got %d", c.AdminLoginRateLimit)
+	}
+	if c.AdminLoginWindow <= 0 {
+		return fmt.Errorf("ADMIN_LOGIN_WINDOW must be > 0, got %v", c.AdminLoginWindow)
+	}
 	return nil
 }
 

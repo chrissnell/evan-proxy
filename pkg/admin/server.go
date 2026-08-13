@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"strconv"
 	"time"
 
 	"evan-proxy/pkg/auth"
@@ -37,15 +38,16 @@ type Options struct {
 func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, opts Options) *Server {
 	sessions := NewSessionStore(24*time.Hour, lg)
 	a := &api{
-		auth:           adminAuth,
-		sessions:       sessions,
-		stats:          collector,
-		users:          users,
-		ports:          ports,
-		logger:         lg,
-		loginLimiter:   ratelimit.New(opts.LoginRateLimit, opts.LoginWindow),
-		trustedProxies: opts.TrustedProxies,
-		globalFails:    newGlobalCounter(opts.LoginGlobalMax, opts.LoginWindow),
+		auth:            adminAuth,
+		sessions:        sessions,
+		stats:           collector,
+		users:           users,
+		ports:           ports,
+		logger:          lg,
+		loginLimiter:    ratelimit.New(opts.LoginRateLimit, opts.LoginWindow),
+		trustedProxies:  opts.TrustedProxies,
+		globalFails:     newGlobalCounter(opts.LoginGlobalMax, opts.LoginWindow),
+		loginRetryAfter: strconv.Itoa(int(opts.LoginWindow.Seconds())),
 	}
 
 	mux := http.NewServeMux()
