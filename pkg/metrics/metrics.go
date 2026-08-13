@@ -9,6 +9,7 @@ import (
 	"evan-proxy/pkg/logging"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -93,9 +94,13 @@ func New(opts Options) *Metrics {
 	}
 
 	// Use a private registry rather than the global default so metrics can't
-	// leak across processes and tests stay isolated.
+	// leak across processes and tests stay isolated. A fresh registry starts
+	// empty, so re-register the Go runtime and process collectors the default
+	// registry would otherwise provide.
 	m.reg = prometheus.NewRegistry()
 	m.reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		m.requests,
 		m.blocked,
 		m.duration,

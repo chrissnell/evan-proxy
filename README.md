@@ -121,6 +121,8 @@ Prometheus metrics are served at `/metrics` on a **dedicated internal listener**
 
 The per-user label on `evanproxy_requests_total` is **off by default** because usernames are PII. The metric is labelled only by `method` and `status_code` unless you set `METRICS_USER_LABEL=true`.
 
+The unauthenticated `net/http/pprof` debug endpoints (`/debug/pprof/*`) share this internal listener too, so process profiles are never exposed on the public admin host. With the legacy `METRICS_LISTEN=""` they fall back to the admin port alongside `/metrics`.
+
 In Kubernetes the pod binds the metrics listener on `0.0.0.0:9091` and exposes it **only** through an internal `ClusterIP` Service (`<release>-evan-proxy-metrics`) — never the public `LoadBalancer`. A NetworkPolicy rule restricts scraping to the namespace named by `metrics.scrapeNamespace` (default `monitoring`). Point Prometheus at that ClusterIP Service (e.g. a `ServiceMonitor` targeting the `metrics` port) rather than the proxy's public IP.
 
 ## Building

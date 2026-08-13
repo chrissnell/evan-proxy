@@ -23,7 +23,7 @@ type Server struct {
 	mux *http.ServeMux
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, mountMetrics bool) *Server {
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, mountDiagnostics bool) *Server {
 	sessions := NewSessionStore(24*time.Hour, lg)
 	a := &api{
 		auth:     adminAuth,
@@ -62,19 +62,14 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 		fmt.Fprintf(w, `{"version":%q}`, version)
 	})
 
-	// Prometheus metrics (no auth — standard for scraping). Only mounted on the
-	// admin port when no dedicated internal metrics listener is configured;
-	// otherwise metrics stay off the public admin host entirely.
-	if mountMetrics {
+	// Diagnostics (Prometheus /metrics + unauthenticated pprof) are mounted on
+	// the admin port only when no dedicated internal listener is configured.
+	// Otherwise they stay off the public admin host entirely and are served on
+	// the internal listener (see cmd/evan-proxy/main.go).
+	if mountDiagnostics {
 		mux.Handle("/metrics", m.Handler())
+		RegisterPprof(mux)
 	}
-
-	// pprof debug endpoints (no auth — admin port is internal-only)
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	// Pages
 	mux.HandleFunc("/login", serveFile("static/login.html"))
@@ -85,6 +80,17 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+// RegisterPprof mounts the net/http/pprof debug endpoints on mux. These are
+// unauthenticated and expose process internals (argv, heap/CPU profiles), so
+// they belong on an internal-only listener — never the public admin host.
+func RegisterPprof(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 }
 
 func serveFile(name string) http.HandlerFunc {

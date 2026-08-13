@@ -30,6 +30,32 @@ func gatherLabelValues(t *testing.T, m *Metrics, metricName, labelName string) [
 	return out
 }
 
+// metricNames returns every metric family name in m's private registry.
+func metricNames(t *testing.T, m *Metrics) map[string]bool {
+	t.Helper()
+	families, err := m.reg.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	names := make(map[string]bool, len(families))
+	for _, mf := range families {
+		names[mf.GetName()] = true
+	}
+	return names
+}
+
+// A private registry starts empty, so the Go runtime and process collectors
+// must be re-registered explicitly or standard dashboards go blank.
+func TestNew_RegistersRuntimeCollectors(t *testing.T) {
+	m := New(Options{})
+	names := metricNames(t, m)
+	for _, want := range []string{"go_goroutines", "process_cpu_seconds_total"} {
+		if !names[want] {
+			t.Fatalf("expected default collector metric %q to be registered", want)
+		}
+	}
+}
+
 func TestObserve_NoUserLabelByDefault(t *testing.T) {
 	m := New(Options{UserLabel: false})
 	m.Observe(logging.Entry{Event: "request", Method: "GET", Status: 200, User: "alice"})

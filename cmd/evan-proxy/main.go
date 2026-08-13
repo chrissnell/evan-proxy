@@ -95,19 +95,22 @@ func main() {
 		}
 	}()
 
-	// Internal metrics listener — kept off the public admin host. Bound to a
-	// private address by default (127.0.0.1:9091); in k8s it binds inside the
-	// pod and is reached only via a ClusterIP + NetworkPolicy.
+	// Internal diagnostics listener — serves /metrics and the unauthenticated
+	// pprof endpoints, kept off the public admin host. Bound to a private
+	// address by default (127.0.0.1:9091); in k8s it binds inside the pod and is
+	// reached only via a ClusterIP + NetworkPolicy.
 	var metricsSrv *http.Server
 	if cfg.MetricsListen != "" {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", m.Handler())
+		admin.RegisterPprof(metricsMux)
 		metricsSrv = &http.Server{
-			Addr:         cfg.MetricsListen,
-			Handler:      metricsMux,
-			ReadTimeout:  10 * time.Second,
-			WriteTimeout: 10 * time.Second,
-			IdleTimeout:  120 * time.Second,
+			Addr:        cfg.MetricsListen,
+			Handler:     metricsMux,
+			ReadTimeout: 10 * time.Second,
+			// No WriteTimeout: pprof CPU/trace profiles stream for 30s+ and would
+			// be truncated. This listener is internal-only.
+			IdleTimeout: 120 * time.Second,
 		}
 		go func() {
 			logger.Infof("metrics", "listening on %s", cfg.MetricsListen)
