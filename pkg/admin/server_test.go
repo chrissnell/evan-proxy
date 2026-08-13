@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -137,5 +138,82 @@ func TestServerSecurityHeaders(t *testing.T) {
 				t.Errorf("expected no HSTS header, got %q", hsts)
 			}
 		})
+	}
+}
+
+// Full pairing flow through the assembled server: login -> enroll -> pair ->
+// bearer-authenticated /api/users -> revoke -> 401.
+func TestServerDevicePairingFlow(t *testing.T) {
+	srv := newTestServer(t, false)
+
+	do := func(req *http.Request) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		return w
+	}
+
+	// Admin logs in.
+	w := do(httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"username":"admin","password":"secret"}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("login = %d, want 200", w.Code)
+	}
+	session := w.Result().Cookies()[0]
+
+	// Enrollment requires the session.
+	if w = do(httptest.NewRequest(http.MethodPost, "/api/devices/enroll", nil)); w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated enroll = %d, want 401", w.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/enroll", nil)
+	req.AddCookie(session)
+	w = do(req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("enroll = %d, want 200", w.Code)
+	}
+	var enr struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&enr); err != nil {
+		t.Fatal(err)
+	}
+
+	// Device pairs without any session.
+	w = do(httptest.NewRequest(http.MethodPost, "/api/pair", strings.NewReader(`{"code":"`+enr.Code+`","device_name":"phone"}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("pair = %d, want 200", w.Code)
+	}
+	var pair struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&pair); err != nil {
+		t.Fatal(err)
+	}
+
+	// The bearer token authenticates a protected route with no cookie.
+	req = httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	req.Header.Set("Authorization", "Bearer "+pair.Token)
+	if w = do(req); w.Code != http.StatusOK {
+		t.Fatalf("bearer /api/users = %d, want 200", w.Code)
+	}
+
+	// Revoke the device; the token stops working.
+	req = httptest.NewRequest(http.MethodGet, "/api/devices", nil)
+	req.AddCookie(session)
+	w = do(req)
+	var devices []userdb.DeviceToken
+	if err := json.NewDecoder(w.Body).Decode(&devices); err != nil {
+		t.Fatal(err)
+	}
+	if len(devices) != 1 {
+		t.Fatalf("want 1 device, got %d", len(devices))
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/api/devices?id="+devices[0].ID, nil)
+	req.AddCookie(session)
+	if w = do(req); w.Code != http.StatusOK {
+		t.Fatalf("revoke = %d, want 200", w.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	req.Header.Set("Authorization", "Bearer "+pair.Token)
+	if w = do(req); w.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked bearer /api/users = %d, want 401", w.Code)
 	}
 }

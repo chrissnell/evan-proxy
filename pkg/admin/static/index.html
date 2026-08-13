@@ -33,6 +33,28 @@
   </div>
 
   <div class="box">
+    <h2>devices</h2>
+    <div id="devices-error" class="error" style="display:none"></div>
+    <table class="user-table" id="device-table">
+      <thead><tr><th>name</th><th>added</th><th>last seen</th><th></th></tr></thead>
+      <tbody id="device-tbody">
+        <tr><td colspan="4" class="empty">loading...</td></tr>
+      </tbody>
+    </table>
+    <div class="user-add-form">
+      <button id="add-device-btn">add device</button>
+    </div>
+    <div id="pair-pane" class="pair-pane" style="display:none">
+      <img id="pair-qr" alt="pairing QR code">
+      <div class="pair-info">
+        <p>Scan with the phone's camera to pair. The code is single-use and expires in <span id="pair-expiry">5</span> minutes.</p>
+        <p class="dim">code: <code id="pair-code"></code></p>
+        <button class="btn-sm" id="pair-done-btn">done</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="box">
     <h2>log tail</h2>
     <div id="log-tail"></div>
   </div>
@@ -975,6 +997,82 @@ function startLogTail() {
 }
 
 startLogTail();
+
+// --- Devices ---
+var deviceDeleteConfirm = null;
+var cachedDevices = [];
+
+async function refreshDevices() {
+  try {
+    var resp = await fetch('/api/devices');
+    if (resp.status === 401) { window.location.href = '/login'; return; }
+    cachedDevices = await resp.json();
+    deviceDeleteConfirm = null;
+    renderDevices(cachedDevices);
+  } catch (e) { /* retry next cycle */ }
+}
+
+function renderDevices(devices) {
+  var tbody = document.getElementById('device-tbody');
+  if (!devices || devices.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">no paired devices</td></tr>';
+    return;
+  }
+  var rows = [];
+  devices.forEach(function(d) {
+    var added = d.created_at ? d.created_at.substring(0, 10) : '';
+    var seen = d.last_seen_at ? escHtml(d.last_seen_at.substring(0, 16)) : '<span class="dim">never</span>';
+    var esc = escAttr(d.id);
+    var revokeBtn = deviceDeleteConfirm === d.id
+      ? '<button class="btn-sm btn-danger-confirm" onclick="confirmRevokeDevice(\'' + esc + '\')">confirm?</button>'
+      : '<button class="btn-sm btn-danger" onclick="startRevokeDevice(\'' + esc + '\')">revoke</button>';
+    rows.push('<tr>' +
+      '<td>' + escHtml(d.name) + '</td>' +
+      '<td class="dim">' + escHtml(added) + '</td>' +
+      '<td>' + seen + '</td>' +
+      '<td class="user-actions">' + revokeBtn + '</td></tr>');
+  });
+  tbody.innerHTML = rows.join('');
+}
+
+function startRevokeDevice(id) {
+  deviceDeleteConfirm = id;
+  renderDevices(cachedDevices);
+}
+
+async function confirmRevokeDevice(id) {
+  showDevicesError('');
+  var resp = await fetch('/api/devices?id=' + encodeURIComponent(id), {method: 'DELETE'});
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showDevicesError('failed to revoke device'); return; }
+  refreshDevices();
+}
+
+function showDevicesError(msg) {
+  var el = document.getElementById('devices-error');
+  el.textContent = msg;
+  el.style.display = msg ? '' : 'none';
+}
+
+document.getElementById('add-device-btn').addEventListener('click', async function() {
+  showDevicesError('');
+  var resp = await fetch('/api/devices/enroll', {method: 'POST'});
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showDevicesError('failed to create enrollment code'); return; }
+  var d = await resp.json();
+  document.getElementById('pair-qr').src = '/api/devices/enroll?code=' + encodeURIComponent(d.code);
+  document.getElementById('pair-code').textContent = d.code;
+  document.getElementById('pair-expiry').textContent = Math.round(d.expires_in / 60);
+  document.getElementById('pair-pane').style.display = '';
+});
+
+document.getElementById('pair-done-btn').addEventListener('click', function() {
+  document.getElementById('pair-pane').style.display = 'none';
+  refreshDevices();
+});
+
+refreshDevices();
+setInterval(refreshDevices, 30000);
 
 // --- Util ---
 function escHtml(s) {
