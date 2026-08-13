@@ -19,6 +19,8 @@ import (
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
+
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // Version is set at build time via -ldflags.
@@ -70,7 +72,7 @@ func main() {
 	counter := stats.NewTrafficCounter(collector)
 	counter.AddObserver(m.ObserveLiveBytes)
 	proxyHandler := proxy.New(cfg, users, users, users, users, users, a, limiter, logger, counter, m)
-	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version)
+	adminServer := admin.NewServer(adminAuth, collector, users, proxyHandler, m, logger, Version, cfg.ForceHTTPS)
 
 	// Per-user dedicated port listeners
 	if err := proxyHandler.StartUserListeners(); err != nil {
@@ -86,12 +88,40 @@ func main() {
 		IdleTimeout: 120 * time.Second,
 	}
 
-	go func() {
-		logger.Infof("admin", "listening on %s", cfg.AdminListen)
-		if err := adminSrv.ListenAndServe(); err != http.ErrServerClosed {
-			logger.Fatalf("admin", "%v", err)
+	if cfg.AutocertHost != "" {
+		// Terminate TLS in-process via Let's Encrypt (single-host deployments,
+		// e.g. Raspberry Pi). No manual cert files needed.
+		mgr := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(cfg.AutocertHost),
+			Cache:      autocert.DirCache(cfg.AutocertDir),
 		}
-	}()
+		adminSrv.TLSConfig = mgr.TLSConfig()
+
+		// :80 serves the ACME http-01 challenge and redirects everything else
+		// to HTTPS.
+		challengeSrv := &http.Server{Addr: ":80", Handler: mgr.HTTPHandler(nil)}
+		go func() {
+			if err := challengeSrv.ListenAndServe(); err != http.ErrServerClosed {
+				logger.Fatalf("admin", "acme http: %v", err)
+			}
+		}()
+		defer challengeSrv.Shutdown(context.Background())
+
+		go func() {
+			logger.Infof("admin", "listening with autocert TLS for %s on %s", cfg.AutocertHost, cfg.AdminListen)
+			if err := adminSrv.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
+				logger.Fatalf("admin", "tls: %v", err)
+			}
+		}()
+	} else {
+		go func() {
+			logger.Infof("admin", "listening on %s", cfg.AdminListen)
+			if err := adminSrv.ListenAndServe(); err != http.ErrServerClosed {
+				logger.Fatalf("admin", "%v", err)
+			}
+		}()
+	}
 
 	// Graceful shutdown
 	sig := make(chan os.Signal, 1)

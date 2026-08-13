@@ -20,18 +20,22 @@ var staticFS embed.FS
 
 // Server is the admin HTTP handler.
 type Server struct {
-	mux *http.ServeMux
+	handler http.Handler
 }
 
-func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string) *Server {
+// NewServer builds the admin HTTP handler. forceHTTPS sets the Secure flag on
+// session cookies and emits HSTS — enable it when TLS terminates in front
+// (ingress) or in-process (autocert).
+func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *userdb.DB, ports PortManager, m *metrics.Metrics, lg *logging.Logger, version string, forceHTTPS bool) *Server {
 	sessions := NewSessionStore(24*time.Hour, lg)
 	a := &api{
-		auth:     adminAuth,
-		sessions: sessions,
-		stats:    collector,
-		users:    users,
-		ports:    ports,
-		logger:   lg,
+		auth:          adminAuth,
+		sessions:      sessions,
+		stats:         collector,
+		users:         users,
+		ports:         ports,
+		logger:        lg,
+		secureCookies: forceHTTPS,
 	}
 
 	mux := http.NewServeMux()
@@ -76,11 +80,11 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 	mux.HandleFunc("/login", serveFile("static/login.html"))
 	mux.HandleFunc("/", a.requireSessionPage(serveFile("static/index.html")))
 
-	return &Server{mux: mux}
+	return &Server{handler: securityHeaders(mux, forceHTTPS)}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	s.handler.ServeHTTP(w, r)
 }
 
 func serveFile(name string) http.HandlerFunc {

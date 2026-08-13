@@ -62,6 +62,9 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 |----------|---------|-------------|
 | `PROXY_DB_PATH` | `/data/evan-proxy/users.db` | Path to SQLite user database |
 | `ADMIN_LISTEN` | `:9090` | Admin interface listen address |
+| `FORCE_HTTPS` | `false` | Set the `Secure` flag on the admin session cookie and send HSTS. Enable when TLS terminates in front (ingress/LB) or via built-in autocert. Implied `true` when `AUTOCERT_HOST` is set. |
+| `AUTOCERT_HOST` | | Hostname to obtain a Let's Encrypt cert for and terminate TLS in-process (single-host deployments). Empty = no built-in TLS (terminate at ingress instead). |
+| `AUTOCERT_DIR` | `/data/evan-proxy/autocert` | Cert cache directory for autocert (persist this across restarts to avoid re-issuing). |
 | `DNS_SERVER` | | Custom DNS resolver (e.g. `1.1.1.1:53`), empty uses system default |
 | `DNS_PROTOCOL` | `plain` | DNS protocol: `plain`, `tls` (DoT), or `https` (DoH) |
 | `USER_PORT_MIN` | `8081` | First per-user dedicated proxy port |
@@ -113,6 +116,58 @@ timezone: "America/Denver"   # IANA timezone, e.g. America/Los_Angeles, US/Easte
 
 Without this, the container defaults to UTC and downtime windows won't match your local time.
 
+## TLS for the admin interface
+
+The admin UI serves credentials and session cookies, so it should be reached over HTTPS on any deployment that isn't a plain-HTTP LAN box. Apple's App Transport Security also refuses plain HTTP and self-signed certs, so a remote iOS companion app needs a valid certificate regardless. Set `FORCE_HTTPS=true` whenever TLS is in front — it sets the `Secure` flag on the session cookie and sends HSTS. The proxy also always sends `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`.
+
+There are two supported ways to get a real cert.
+
+### Recipe 1 — Kubernetes ingress + cert-manager (recommended for the cluster)
+
+Terminate TLS at the ingress and let [cert-manager](https://cert-manager.io) issue and renew the certificate. The chart creates a dedicated `ClusterIP` service (`<release>-admin`) as the ingress backend, so the admin port need not be exposed on the public `LoadBalancer`:
+
+```yaml
+# values.yaml
+admin:
+  forceHTTPS: true          # Secure cookie + HSTS (TLS is in front)
+
+service:
+  exposeAdmin: false        # keep plaintext 9090 off the public LoadBalancer;
+                            # the per-user proxy ports stay exposed
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: proxy.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          servicePort: 9090
+  tls:
+    - secretName: evan-proxy-tls
+      hosts:
+        - proxy.example.com
+```
+
+The per-user proxy ports (`userPortMin`–`userPortMax`) remain on the `LoadBalancer` service — they are the product and must stay reachable. Only the admin port moves behind the ingress.
+
+### Recipe 2 — Built-in autocert (single host, e.g. Raspberry Pi)
+
+For a single-host deployment with no ingress, the binary can obtain and renew a Let's Encrypt certificate itself — no manual cert files:
+
+```bash
+export ADMIN_USER=admin
+export ADMIN_PASSWORD='<bcrypt-hash>'
+export AUTOCERT_HOST=proxy.example.com          # public DNS name pointing at this host
+export AUTOCERT_DIR=/data/evan-proxy/autocert   # persist across restarts
+./evan-proxy
+```
+
+The host must be reachable from the internet on port `80` (ACME `http-01` challenge; also redirects to HTTPS) and on the admin port for HTTPS. Setting `AUTOCERT_HOST` implies `FORCE_HTTPS=true`. Persist `AUTOCERT_DIR` so certs survive restarts and you don't hit Let's Encrypt rate limits.
+
 ## Building
 
 ```bash
@@ -158,6 +213,7 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `admin.listen` | string | `":9090"` | Admin interface listen address |
 | `admin.user` | string | `"admin"` | Admin username |
 | `admin.passwordHash` | string | `"$2y$10$CHANGEME"` | Admin password as bcrypt hash |
+| `admin.forceHTTPS` | bool | `false` | Set `Secure` session cookie + HSTS. Enable when TLS is in front (ingress/LB) |
 | `existingSecret` | string | `""` | Use a pre-created Secret instead of generating one. Must contain keys: `ADMIN_USER`, `ADMIN_PASSWORD` |
 | `persistence.enabled` | bool | `true` | Enable persistent storage for SQLite database |
 | `persistence.size` | string | `"1Gi"` | PVC size |
@@ -166,9 +222,12 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `service.loadBalancerIP` | string | `""` | Static IP from MetalLB pool |
 | `service.annotations` | object | `{}` | Service annotations |
 | `service.adminPort` | int | `9090` | Service port for admin interface |
-| `ingress.enabled` | bool | `false` | Enable ingress (e.g. for admin UI) |
+| `service.exposeAdmin` | bool | `true` | Expose the admin port on the `LoadBalancer`. Set `false` and use the ingress for internet-facing deployments |
+| `ingress.enabled` | bool | `false` | Enable ingress for the admin UI (creates a `ClusterIP` backend service) |
 | `ingress.className` | string | `""` | Ingress class name |
+| `ingress.annotations` | object | `{}` | Ingress annotations (e.g. `cert-manager.io/cluster-issuer`) |
 | `ingress.hosts` | list | | Ingress host rules |
+| `ingress.tls` | list | `[]` | Ingress TLS blocks (`secretName` + `hosts`) |
 | `resources.requests.cpu` | string | `"100m"` | CPU request |
 | `resources.requests.memory` | string | `"64Mi"` | Memory request |
 | `resources.limits.cpu` | string | `"1000m"` | CPU limit |

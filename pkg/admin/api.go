@@ -26,12 +26,13 @@ type PortManager interface {
 }
 
 type api struct {
-	auth     *auth.AdminAuth
-	sessions *SessionStore
-	stats    *stats.Collector
-	users    *userdb.DB
-	ports    PortManager
-	logger   *logging.Logger
+	auth          *auth.AdminAuth
+	sessions      *SessionStore
+	stats         *stats.Collector
+	users         *userdb.DB
+	ports         PortManager
+	logger        *logging.Logger
+	secureCookies bool
 }
 
 type loginRequest struct {
@@ -67,14 +68,7 @@ func (a *api) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := a.sessions.Create()
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   86400,
-	})
+	http.SetCookie(w, sessionCookieFor(token, a.secureCookies))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -87,14 +81,7 @@ func (a *api) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		a.sessions.Delete(c.Value)
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		MaxAge:   -1,
-	})
+	http.SetCookie(w, clearedSessionCookie(a.secureCookies))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -464,7 +451,7 @@ func (a *api) handleTestDNS(w http.ResponseWriter, r *http.Request) {
 }
 
 type downtimeRequest struct {
-	Username         string                 `json:"username"`
+	Username         string                  `json:"username"`
 	DowntimeSchedule userdb.DowntimeSchedule `json:"downtime_schedule"`
 }
 

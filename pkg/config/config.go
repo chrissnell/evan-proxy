@@ -19,6 +19,11 @@ type Config struct {
 	AdminUser     string
 	AdminPassword string // bcrypt hash
 
+	// TLS / transport security
+	ForceHTTPS   bool   // set Secure session cookie + HSTS; assume TLS terminates in front or via autocert
+	AutocertHost string // if set, terminate TLS in-process via Let's Encrypt for this hostname
+	AutocertDir  string // cert cache dir (persistent volume)
+
 	// DNS
 	DNSServer   string // e.g. "1.1.1.1:53", empty = system default
 	DNSProtocol string // "plain", "tls", or "https" — default "plain"
@@ -70,6 +75,9 @@ func Load() (*Config, error) {
 		AdminListen:         envOr("ADMIN_LISTEN", ":9090"),
 		AdminUser:           os.Getenv("ADMIN_USER"),
 		AdminPassword:       os.Getenv("ADMIN_PASSWORD"),
+		ForceHTTPS:          envBool("FORCE_HTTPS", false),
+		AutocertHost:        os.Getenv("AUTOCERT_HOST"),
+		AutocertDir:         envOr("AUTOCERT_DIR", "/data/evan-proxy/autocert"),
 		DNSServer:           os.Getenv("DNS_SERVER"),
 		DNSProtocol:         envOr("DNS_PROTOCOL", "plain"),
 		AuthRetryTimeout:    envDuration("AUTH_RETRY_TIMEOUT", 5*time.Second),
@@ -91,6 +99,12 @@ func Load() (*Config, error) {
 		PACProxyEndpoint:    os.Getenv("PAC_PROXY_ENDPOINT"),
 		PACBypassDomains: envCSV("PAC_BYPASS_DOMAINS",
 			[]string{"venmo.com", "paypal.com", "paypalobjects.com", "braintreegateway.com", "braintree-api.com"}),
+	}
+
+	// Built-in autocert terminates TLS in-process, so cookies are always served
+	// over HTTPS — imply ForceHTTPS to get the Secure flag and HSTS.
+	if cfg.AutocertHost != "" {
+		cfg.ForceHTTPS = true
 	}
 
 	if err := cfg.validate(); err != nil {
