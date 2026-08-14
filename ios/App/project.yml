@@ -3,6 +3,9 @@ options:
   bundleIdPrefix: com.evanproxy
   deploymentTarget:
     iOS: "17.0"
+  # Stamp what this generation was built from, so builds can detect a stale
+  # generated project (Generated/ is gitignored — see the guard script below).
+  postGenCommand: shasum -a 256 project.yml > Generated/project.yml.sha256
 packages:
   EvanProxy:
     path: ..
@@ -38,6 +41,20 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.evanproxy.app
         CODE_SIGN_STYLE: Automatic
+    preBuildScripts:
+      # Generated/Info.plist is gitignored, so pulling a project.yml change
+      # without re-running xcodegen silently ships a stale plist (this once
+      # dropped NSCameraUsageDescription and crashed the scanner). Fail the
+      # build loudly instead.
+      - name: Guard against stale generated project
+        shell: /bin/bash
+        script: |
+          cd "${PROJECT_DIR}"
+          if ! shasum -a 256 --status -c Generated/project.yml.sha256 2>/dev/null; then
+            echo "error: project.yml changed since this Xcode project was generated — run 'xcodegen generate' in ios/App" >&2
+            exit 1
+          fi
+        basedOnDependencyAnalysis: false
   EvanProxyAppTests:
     type: bundle.unit-test
     platform: iOS

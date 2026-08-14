@@ -20,7 +20,15 @@ public struct RootView: View {
                 PairingView(pairing: pairing)
             } else if let client {
                 MainTabs(client: client, auth: auth)
-            } else { Color.clear.onAppear(perform: build) }
+            } else {
+                // Authenticated but no buildable client means a token without
+                // server config — an orphaned state that used to strand the app
+                // on a blank screen. Recover to pairing instead.
+                Palette.bg.ignoresSafeArea().onAppear {
+                    build()
+                    if client == nil { auth.unpair() }
+                }
+            }
         }
         .task {
             build()
@@ -38,7 +46,7 @@ public struct RootView: View {
             Button("Cancel", role: .cancel) {}
             Button("Pair") { Task { await pairing.confirm(p) } }
         } message: { p in
-            Text("This points the app at \(p.host) and replaces the current server and pairing on this device")
+            Text("This points the app at \(p.baseURLString) and replaces the current server and pairing on this device")
         }
     }
     private func build() { client = try? APIClientFactory.make(auth: auth) }
