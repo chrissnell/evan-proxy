@@ -14,30 +14,30 @@ struct UserDetailView: View {
                 SectionHeader(title: "access")
                 Box {
                     HStack {
-                        Text("proxy status").font(Typography.mono(14)).foregroundStyle(Palette.fg)
+                        Text("Proxy status").font(Typography.mono(14)).foregroundStyle(Palette.fg)
                         Spacer()
-                        StatusChip(text: user.enabled ? "enabled" : "disabled",
+                        StatusChip(text: user.enabled ? "Enabled" : "Disabled",
                                    color: user.enabled ? Palette.accent : Palette.danger)
                     }
                 }
                 SectionHeader(title: "configuration")
                 Box {
                     VStack(spacing: 0) {
-                        NavigationLink { PortEditor(user: user, api: api, onChange: onChange) } label: { row("port", "\(user.port)") }
+                        NavigationLink { PortEditor(user: user, api: api, onChange: onChange) } label: { row("Port", "\(user.port)") }
                         Divider().overlay(Palette.borderSubtle)
-                        NavigationLink { DNSEditor(user: user, api: api, onChange: onChange) } label: { row("dns", user.dns_server.isEmpty ? "default" : user.dns_server) }
+                        NavigationLink { DNSEditor(user: user, api: api, onChange: onChange) } label: { row("DNS", user.dns_server.isEmpty ? "Default" : user.dns_server) }
                         Divider().overlay(Palette.borderSubtle)
-                        NavigationLink { PasswordEditor(user: user, api: api) } label: { row("password", "••••••••") }
+                        NavigationLink { PasswordEditor(user: user, api: api) } label: { row("Password", "••••••••") }
                     }
                 }
                 if let e = error {
                     Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger)
                 }
-                PillButton(title: confirmingDelete ? "confirm delete" : "delete user", color: Palette.danger) {
+                PillButton(title: confirmingDelete ? "Confirm Delete" : "Delete User", color: Palette.danger) {
                     if confirmingDelete {
                         Task {
                             do { try await api.deleteUser(user.username); await onChange(); dismiss() }
-                            catch { self.error = "delete failed"; confirmingDelete = false }
+                            catch { self.error = "Delete failed"; confirmingDelete = false }
                         }
                     } else { confirmingDelete = true }
                 }.padding(.top, 8)
@@ -67,16 +67,16 @@ struct PortEditor: View {
                     .padding(8).overlay(RoundedRectangle(cornerRadius: 2).stroke(Palette.border))
             }
             if let e = error { Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger) }
-            PillButton(title: "save", color: Palette.accent, filled: true) {
+            PillButton(title: "Save", color: Palette.accent, filled: true) {
                 guard let p = Int(port) else { return }
                 Task {
                     do { try await api.setPort(user.username, p); await onChange(); dismiss() }
-                    catch { self.error = "save failed (port in use?)" }
+                    catch { self.error = "Save failed (port in use?)" }
                 }
             }
         }
         .padding(12).frame(maxHeight: .infinity, alignment: .top)
-        .background(Palette.bg).navigationTitle("port · \(user.username)")
+        .background(Palette.bg).navigationTitle("Port · \(user.username)")
         .onAppear { port = String(user.port) }
     }
 }
@@ -95,7 +95,7 @@ struct DNSEditor: View {
             SectionHeader(title: "dns override")
             Box {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("server (empty = default)").font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
+                    Text("Server (empty = default)").font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
                     TextField("", text: $server).textInputAutocapitalization(.never)
                         .autocorrectionDisabled().font(Typography.mono(14))
                         .padding(8).overlay(RoundedRectangle(cornerRadius: 2).stroke(Palette.border))
@@ -104,27 +104,27 @@ struct DNSEditor: View {
                     }.pickerStyle(.segmented)
                     if let t = testResult {
                         Text(t).font(Typography.mono(12))
-                            .foregroundStyle(t == "ok" ? Palette.accent : Palette.danger)
+                            .foregroundStyle(t == "OK" ? Palette.accent : Palette.danger)
                     }
                 }
             }
             if let e = error { Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger) }
             HStack(spacing: 6) {
-                PillButton(title: "test") {
-                    Task { testResult = ((try? await api.testDNS(server: server, proto: proto)) == true) ? "ok" : "failed" }
+                PillButton(title: "Test") {
+                    Task { testResult = ((try? await api.testDNS(server: server, proto: proto)) == true) ? "OK" : "Failed" }
                 }
-                PillButton(title: "save", color: Palette.accent, filled: true) {
+                PillButton(title: "Save", color: Palette.accent, filled: true) {
                     Task {
                         do {
                             try await api.setDNS(user.username, server: server, proto: server.isEmpty ? "" : proto)
                             await onChange(); dismiss()
-                        } catch { self.error = "save failed" }
+                        } catch { self.error = "Save failed" }
                     }
                 }
             }
         }
         .padding(12).frame(maxHeight: .infinity, alignment: .top)
-        .background(Palette.bg).navigationTitle("dns · \(user.username)")
+        .background(Palette.bg).navigationTitle("DNS · \(user.username)")
         .onAppear { server = user.dns_server; proto = user.dns_protocol == ._empty ? "plain" : user.dns_protocol.rawValue }
     }
 }
@@ -143,15 +143,15 @@ struct PasswordEditor: View {
                     .padding(8).overlay(RoundedRectangle(cornerRadius: 2).stroke(Palette.border))
             }
             if let e = error { Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger) }
-            PillButton(title: "save", color: Palette.accent, filled: true) {
+            PillButton(title: "Save", color: Palette.accent, filled: true) {
                 guard !password.isEmpty else { return }
                 Task {
                     do { try await api.changePassword(user.username, password); dismiss() }
-                    catch { self.error = "save failed" }
+                    catch { self.error = "Save failed" }
                 }
             }
         }
         .padding(12).frame(maxHeight: .infinity, alignment: .top)
-        .background(Palette.bg).navigationTitle("password · \(user.username)")
+        .background(Palette.bg).navigationTitle("Password · \(user.username)")
     }
 }

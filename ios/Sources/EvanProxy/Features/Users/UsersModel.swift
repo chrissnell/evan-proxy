@@ -74,19 +74,19 @@ final class UsersModel {
 
     func load() async {
         do { users = try await api.listUsers(); error = nil }
-        catch { self.error = "failed to load users" }
+        catch { self.error = "Failed to load users" }
     }
     func setEnabled(_ username: String, _ enabled: Bool) async {
         do { try await api.setEnabled(username, enabled); await load() }
-        catch { self.error = "failed to update user" }
+        catch { self.error = "Failed to update user" }
     }
     func setOverride(_ username: String, minutes: Int) async {
         do { try await api.setOverride(username, minutes: minutes); await load() }
-        catch { self.error = "failed to set override" }
+        catch { self.error = "Failed to set override" }
     }
     /// Returns true on success so the add-user sheet knows to dismiss.
     func createUser(_ username: String, _ password: String) async -> Bool {
         do { try await api.createUser(username, password); await load(); return true }
-        catch { self.error = "failed to create user"; return false }
+        catch { self.error = "Failed to create user"; return false }
     }
 }

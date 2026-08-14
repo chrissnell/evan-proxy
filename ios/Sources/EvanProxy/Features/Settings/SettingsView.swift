@@ -8,7 +8,7 @@ struct SettingsView: View {
                 SectionHeader(title: "server")
                 Box {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("paired with").font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
+                        Text("Paired with").font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
                         // The URL comes from the pairing QR; re-pair to change it.
                         Text(ServerConfig.baseURL?.absoluteString ?? "—")
                             .font(Typography.mono(14)).foregroundStyle(Palette.fg)
@@ -17,14 +17,14 @@ struct SettingsView: View {
                 SectionHeader(title: "device")
                 Box {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("unpairing removes the token from this device only —\nrevoke it in the admin \"devices\" panel too.\nscan a new QR to reconnect")
+                        Text("Unpairing removes the token from this device only —\nrevoke it in the admin \"Devices\" panel too.\nScan a new QR to reconnect")
                             .font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
-                        PillButton(title: "unpair", color: Palette.danger) {
+                        PillButton(title: "Unpair", color: Palette.danger) {
                             auth.unpair()
                         }
                     }
                 }
             }.padding(12)
-        }.background(Palette.bg).navigationTitle("settings")
+        }.background(Palette.bg).navigationTitle("Settings")
     }
 }

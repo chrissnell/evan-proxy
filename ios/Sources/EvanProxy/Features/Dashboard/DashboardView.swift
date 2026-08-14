@@ -28,7 +28,7 @@ struct DashboardView: View {
     private func hostList(_ hosts: [Components.Schemas.HostCount], color: Color = Palette.fg) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if hosts.isEmpty {
-                Text("no data").font(Typography.mono(12)).foregroundStyle(Palette.fgDim)
+                Text("No data").font(Typography.mono(12)).foregroundStyle(Palette.fgDim)
             }
             ForEach(Array(hosts.enumerated()), id: \.offset) { _, h in
                 HStack {
