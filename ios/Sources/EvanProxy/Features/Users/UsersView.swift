@@ -24,16 +24,16 @@ struct UsersView: View {
                             onEdit: { detailUser = u },
                             onOverride: { overrideUser = u })
                     }
-                    PillButton(title: "+ add user", color: Palette.accent) { showingAdd = true }
+                    PillButton(title: "+ Add User", color: Palette.accent) { showingAdd = true }
                 }.padding(12)
             }
             .background(Palette.bg)
             .navigationDestination(item: $detailUser) { makeDetail($0) }
             .navigationDestination(item: $scheduleUser) { makeSchedule($0) }
-            .confirmationDialog("downtime override", isPresented: overridePresented,
+            .confirmationDialog("Downtime override", isPresented: overridePresented,
                                 titleVisibility: .visible, presenting: overrideUser) { u in
                 if case .override = UserStatus.state(for: u) {
-                    Button("cancel override", role: .destructive) {
+                    Button("Cancel Override", role: .destructive) {
                         Task { await model.setOverride(u.username, minutes: 0) }
                     }
                 } else {
@@ -69,12 +69,12 @@ struct AddUserSheet: View {
             SectionHeader(title: "add user")
             Box {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("username").font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
+                    Text("Username").font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
                     TextField("", text: $username)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .font(Typography.mono(14)).padding(8)
                         .overlay(RoundedRectangle(cornerRadius: 2).stroke(Palette.border))
-                    Text("password").font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
+                    Text("Password").font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
                     SecureField("", text: $password)
                         .font(Typography.mono(14)).padding(8)
                         .overlay(RoundedRectangle(cornerRadius: 2).stroke(Palette.border))
@@ -83,13 +83,13 @@ struct AddUserSheet: View {
                     }
                 }
             }
-            PillButton(title: busy ? "creating…" : "create", color: Palette.accent, filled: true) {
+            PillButton(title: busy ? "Creating…" : "Create", color: Palette.accent, filled: true) {
                 guard !username.isEmpty, !password.isEmpty, !busy else { return }
                 busy = true
                 Task {
                     defer { busy = false }
                     if await onCreate(username, password) { dismiss() }
-                    else { error = "failed to create user (name taken?)" }
+                    else { error = "Failed to create user (name taken?)" }
                 }
             }
         }

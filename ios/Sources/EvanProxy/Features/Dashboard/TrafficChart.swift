@@ -41,7 +41,7 @@ struct TrafficChart: View {
 
     var body: some View {
         if points.isEmpty {
-            Text("no data")
+            Text("No data")
                 .font(Typography.mono(12)).foregroundStyle(Palette.fgDim)
                 .frame(maxWidth: .infinity, minHeight: 140)
         } else {

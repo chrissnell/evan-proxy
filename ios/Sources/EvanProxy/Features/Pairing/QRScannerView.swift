@@ -59,7 +59,7 @@ final class ScannerViewController: UIViewController, @preconcurrency AVCaptureMe
 
     private func showDenied() {
         let label = UILabel()
-        label.text = "camera access denied —\nenable it in Settings to scan"
+        label.text = "Camera access denied —\nenable it in Settings to scan"
         label.numberOfLines = 0
         label.textAlignment = .center
         label.textColor = .white

@@ -18,17 +18,17 @@ struct ScheduleEditorView: View {
                 ForEach(0..<7, id: \.self) { d in dayRow(d) }
                 if let e = error { Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger) }
                 HStack {
-                    PillButton(title: "copy Sun → all") { copySundayToAll() }
-                    PillButton(title: "save", color: Palette.accent, filled: true) {
+                    PillButton(title: "Copy Sun → All") { copySundayToAll() }
+                    PillButton(title: "Save", color: Palette.accent, filled: true) {
                         Task {
                             do { try await api.setDowntime(user.username, cleaned()); await onChange(); dismiss() }
-                            catch { self.error = "save failed" }
+                            catch { self.error = "Save failed" }
                         }
                     }
                 }.padding(.top, 8)
             }.padding(12)
         }
-        .background(Palette.bg).navigationTitle("downtime · \(user.username)")
+        .background(Palette.bg).navigationTitle("Downtime · \(user.username)")
         .onAppear { schedule = user.downtime_schedule?.additionalProperties ?? [:] }
         .sheet(item: $editing) { ref in
             TimeWheelSheet(window: binding(for: ref)) {
@@ -50,7 +50,7 @@ struct ScheduleEditorView: View {
                         }
                     }
                     Button { addWindow(day: d) } label: {
-                        Text("+ add").font(Typography.mono(12)).foregroundStyle(Palette.accent)
+                        Text("+ Add").font(Typography.mono(12)).foregroundStyle(Palette.accent)
                     }
                 }
             }
@@ -100,12 +100,12 @@ struct TimeWheelSheet: View {
         VStack(spacing: 12) {
             SectionHeader(title: "downtime window")
             HStack {
-                picker("start", $window.start)
-                picker("end", $window.end)
+                picker("Start", $window.start)
+                picker("End", $window.end)
             }
             HStack(spacing: 6) {
-                PillButton(title: "remove", color: Palette.danger) { onRemove() }
-                PillButton(title: "done", color: Palette.accent, filled: true) { dismiss() }
+                PillButton(title: "Remove", color: Palette.danger) { onRemove() }
+                PillButton(title: "Done", color: Palette.accent, filled: true) { dismiss() }
             }
         }
         .padding(16)

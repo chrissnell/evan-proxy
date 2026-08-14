@@ -11,7 +11,7 @@ struct PairingView: View {
             Text("evan-proxy").font(Typography.mono(22, weight: .bold)).foregroundStyle(Palette.fg)
             Box {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Pair this device —\nscan the QR from the admin \"Devices\" panel")
+                    Text("Pair this device —\nScan the QR from the admin \"Devices\" panel")
                         .font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
                     if let e = pairing.error {
                         Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger)

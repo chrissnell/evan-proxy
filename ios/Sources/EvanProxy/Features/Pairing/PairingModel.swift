@@ -62,7 +62,7 @@ final class PairingModel {
             let p = try Self.parse(url)
             pending = PendingPair(host: p.host, code: p.code)
         } catch {
-            self.error = "not an evan-proxy pairing code"
+            self.error = "Not an evan-proxy pairing code"
         }
     }
 
@@ -76,11 +76,11 @@ final class PairingModel {
         do {
             try await pair(host: p.host, code: p.code)
         } catch PairingError.invalidLink {
-            error = "not an evan-proxy pairing code"
+            error = "Not an evan-proxy pairing code"
         } catch PairingError.rejected {
-            error = "code expired or already used — generate a new QR"
+            error = "Code expired or already used — generate a new QR"
         } catch {
-            self.error = "connection failed — check network"
+            self.error = "Connection failed — check network"
         }
     }
 
@@ -88,7 +88,7 @@ final class PairingModel {
 
     func handle(scanned: String) async {
         guard let url = URL(string: scanned) else {
-            error = "not an evan-proxy pairing code"
+            error = "Not an evan-proxy pairing code"
             return
         }
         await handle(url)
