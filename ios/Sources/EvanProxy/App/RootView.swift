@@ -38,7 +38,7 @@ public struct RootView: View {
             Button("cancel", role: .cancel) {}
             Button("pair") { Task { await pairing.confirm(p) } }
         } message: { p in
-            Text("this points the app at \(p.host) and replaces the current server and login on this device")
+            Text("this points the app at \(p.host) and replaces the current server and pairing on this device")
         }
     }
     private func build() { client = try? APIClientFactory.make(auth: auth) }

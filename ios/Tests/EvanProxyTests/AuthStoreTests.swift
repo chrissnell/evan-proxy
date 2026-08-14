@@ -4,7 +4,9 @@ import XCTest
 @MainActor
 final class AuthStoreTests: XCTestCase {
     let testKeychain = Keychain(service: "com.evanproxy.authtests")
-    func makeStore() -> AuthStore { AuthStore(keychain: testKeychain) }
+    func makeStore(hasServerConfig: @escaping () -> Bool = { true }) -> AuthStore {
+        AuthStore(keychain: testKeychain, hasServerConfig: hasServerConfig)
+    }
     override func tearDown() {
         try? testKeychain.remove("username")
         try? testKeychain.remove("password")
@@ -18,6 +20,25 @@ final class AuthStoreTests: XCTestCase {
         _ = makeStore()
         XCTAssertNil(try testKeychain.get("username"))
         XCTAssertNil(try testKeychain.get("password"))
+    }
+
+    func test_init_scrubsLegacySessionCookies() throws {
+        let cookie = HTTPCookie(properties: [.domain: "proxy.example.com", .path: "/",
+                                             .name: "evan-proxy-session", .value: "legacy"])!
+        HTTPCookieStorage.shared.setCookie(cookie)
+        _ = makeStore()
+        let remaining = HTTPCookieStorage.shared.cookies ?? []
+        XCTAssertFalse(remaining.contains { $0.name == "evan-proxy-session" })
+    }
+
+    func test_resumePairedSession_orphanedToken_withoutServerConfig_scrubsToken() throws {
+        // Keychain outlives app deletion; UserDefaults doesn't. A reinstall
+        // must land on pairing, not authenticate against a missing server.
+        try testKeychain.set("orphan", for: "deviceToken")
+        let store = makeStore(hasServerConfig: { false })
+        store.resumePairedSession()
+        XCTAssertFalse(store.isAuthenticated)
+        XCTAssertNil(store.currentDeviceToken())
     }
 
     func test_storePairing_storesToken_marksAuthenticated() throws {

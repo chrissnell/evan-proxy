@@ -17,7 +17,7 @@ struct SettingsView: View {
                 SectionHeader(title: "device")
                 Box {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("unpairing removes this device's token —\nscan a new QR to reconnect")
+                        Text("unpairing removes the token from this device only —\nrevoke it in the admin \"devices\" panel too.\nscan a new QR to reconnect")
                             .font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
                         PillButton(title: "unpair", color: Palette.danger) {
                             auth.unpair()

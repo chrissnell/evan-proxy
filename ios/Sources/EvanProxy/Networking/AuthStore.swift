@@ -9,13 +9,19 @@ enum AuthError: Error { case notConfigured }
 @MainActor
 final class AuthStore {
     private let keychain: Keychain
+    private let hasServerConfig: () -> Bool
     private(set) var isAuthenticated = false
 
-    init(keychain: Keychain = Keychain(service: "com.evanproxy.credentials")) {
+    init(keychain: Keychain = Keychain(service: "com.evanproxy.credentials"),
+         hasServerConfig: @escaping () -> Bool = { ServerConfig.baseURL != nil }) {
         self.keychain = keychain
+        self.hasServerConfig = hasServerConfig
         // Migration: scrub the password credential stored by pre-pairing builds.
         try? keychain.remove("username")
         try? keychain.remove("password")
+        // Also drop their session cookie — the server's cookie fallback would
+        // otherwise keep a revoked device token working indefinitely.
+        HTTPCookieStorage.shared.removeCookies(since: .distantPast)
     }
 
     var hasDeviceToken: Bool { currentDeviceToken() != nil }
@@ -33,7 +39,11 @@ final class AuthStore {
     /// On launch a stored token is trusted until the server says otherwise —
     /// a revoked one 401s on first use and drops back to pairing.
     func resumePairedSession() {
-        if hasDeviceToken { isAuthenticated = true }
+        guard hasDeviceToken else { return }
+        // The keychain outlives app deletion but UserDefaults doesn't: after a
+        // delete-and-reinstall the token has no paired server, which would
+        // dead-end the UI — scrub it and return to pairing instead.
+        if hasServerConfig() { isAuthenticated = true } else { unpair() }
     }
 
     /// A revoked token can't be refreshed — clear it so the UI returns to pairing.

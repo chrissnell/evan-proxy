@@ -84,7 +84,9 @@ struct LogStream {
                         }
                         let (bytes, resp) = try await APIClientFactory.session.bytes(for: req)
                         if (resp as? HTTPURLResponse)?.statusCode == 401 {
+                            // Unpaired now — no point retrying without a token.
                             await onAuthFailure?()
+                            break
                         } else {
                             for try await entry in SSEParser.entries(from: bytes.lines) {
                                 delay = 1.0
