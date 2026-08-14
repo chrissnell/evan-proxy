@@ -7,6 +7,7 @@ struct PairingView: View {
     let pairing: PairingModel
     @State private var showScanner = false
     @State private var showManual = false
+    @State private var staged: PendingPair?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -21,10 +22,7 @@ struct PairingView: View {
                     PillButton(title: pairing.busy ? "…" : "Scan QR to Pair", color: Palette.accent) {
                         showScanner = true
                     }
-                    PillButton(title: "Enter Code Manually") {
-                        pairing.error = nil
-                        showManual = true
-                    }
+                    PillButton(title: "Enter Code Manually") { showManual = true }
                 }
             }
         }
@@ -37,19 +35,28 @@ struct PairingView: View {
             }
             .ignoresSafeArea()
         }
-        .sheet(isPresented: $showManual) {
-            ManualPairSheet(pairing: pairing)
+        // Staging waits for onDismiss: setting `pending` while the sheet is
+        // still up would trigger RootView's confirmation alert mid-dismissal,
+        // which SwiftUI can drop.
+        .sheet(isPresented: $showManual, onDismiss: {
+            if let p = staged { staged = nil; pairing.stage(p) }
+        }) {
+            ManualPairSheet { p in
+                staged = p
+                showManual = false
+            }
         }
     }
 }
 
 /// Camera-free fallback: type the server address and the enrollment code
-/// shown under the QR in the admin "Devices" panel.
+/// shown under the QR in the admin "Devices" panel. Validation errors stay
+/// local to the sheet so they never bleed onto the scan screen (or vice versa).
 struct ManualPairSheet: View {
-    let pairing: PairingModel
-    @Environment(\.dismiss) private var dismiss
+    let onSubmit: (PendingPair) -> Void
     @State private var host = ""
     @State private var code = ""
+    @State private var error: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -69,17 +76,17 @@ struct ManualPairSheet: View {
                         .overlay(RoundedRectangle(cornerRadius: 2).stroke(Palette.border))
                     Text("The code is shown under the QR in the admin \"Devices\" panel")
                         .font(Typography.mono(11)).foregroundStyle(Palette.fgDim)
-                    if let e = pairing.error {
+                    if let e = error {
                         Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger)
                     }
                 }
             }
             PillButton(title: "Pair", color: Palette.accent, filled: true) {
-                pairing.handleManual(host: host, code: code)
-                // Success stages a pending pair; the confirmation alert takes
-                // over once the sheet is gone. Failure keeps the sheet up with
-                // the error inline so the typo can be fixed in place.
-                if pairing.pending != nil { dismiss() }
+                guard let p = PairingModel.validateManual(host: host, code: code) else {
+                    error = "Invalid server address or code"
+                    return
+                }
+                onSubmit(p)
             }
         }
         .padding(16).frame(maxHeight: .infinity, alignment: .top)

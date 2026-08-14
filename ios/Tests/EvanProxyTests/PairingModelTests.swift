@@ -80,47 +80,42 @@ final class PairingModelTests: XCTestCase {
 
     // MARK: Manual entry — camera-free fallback goes through the same staging
 
+    func test_validateManual_valid_returnsPair() {
+        let p = PairingModel.validateManual(host: "proxy.example.com:8443", code: "abc123")
+        XCTAssertEqual(p, PendingPair(host: "proxy.example.com:8443", code: "abc123"))
+    }
+
+    func test_validateManual_forgivesWhitespaceSchemeAndTrailingSlash() {
+        XCTAssertEqual(
+            PairingModel.validateManual(host: "  https://proxy.example.com/  ", code: " abc123\n"),
+            PendingPair(host: "proxy.example.com", code: "abc123"))
+        XCTAssertEqual(
+            PairingModel.validateManual(host: "http://proxy.example.com", code: "abc"),
+            PendingPair(host: "proxy.example.com", code: "abc"))
+    }
+
+    func test_validateManual_rejectsUnsafeHosts() {
+        XCTAssertNil(PairingModel.validateManual(host: "evil.example/path", code: "abc"))
+        XCTAssertNil(PairingModel.validateManual(host: "user@evil.example", code: "abc"))
+        // Percent-encoding must not slip past the literal blacklist.
+        XCTAssertNil(PairingModel.validateManual(host: "evil.example%2Fpath", code: "abc"))
+        XCTAssertNil(PairingModel.validateManual(host: "user%40evil.example", code: "abc"))
+    }
+
+    func test_validateManual_rejectsEmptyOrDegenerateInput() {
+        XCTAssertNil(PairingModel.validateManual(host: "", code: ""))
+        XCTAssertNil(PairingModel.validateManual(host: "proxy.example.com", code: "   "))
+        // Reduces to empty after forgiveness.
+        XCTAssertNil(PairingModel.validateManual(host: "https:///", code: "abc"))
+    }
+
     @MainActor
-    func test_handleManual_valid_stagesPending() {
+    func test_stage_setsPending_clearsError_doesNotPair() {
         let model = makeModel()
-        model.handleManual(host: "proxy.example.com:8443", code: "abc123")
-        XCTAssertEqual(model.pending, PendingPair(host: "proxy.example.com:8443", code: "abc123"))
+        model.error = "stale scan error"
+        model.stage(PendingPair(host: "proxy.example.com", code: "abc123"))
+        XCTAssertEqual(model.pending, PendingPair(host: "proxy.example.com", code: "abc123"))
         XCTAssertNil(model.error)
         XCTAssertFalse(model.auth.hasDeviceToken)   // still needs confirmation
-    }
-
-    @MainActor
-    func test_handleManual_forgivesWhitespaceSchemeAndTrailingSlash() {
-        let model = makeModel()
-        model.handleManual(host: "  https://proxy.example.com/  ", code: " abc123\n")
-        XCTAssertEqual(model.pending, PendingPair(host: "proxy.example.com", code: "abc123"))
-    }
-
-    @MainActor
-    func test_handleManual_hostWithPath_setsError_noPending() {
-        let model = makeModel()
-        model.handleManual(host: "evil.example/path", code: "abc")
-        XCTAssertNil(model.pending)
-        XCTAssertNotNil(model.error)
-    }
-
-    @MainActor
-    func test_handleManual_hostWithUserinfo_setsError_noPending() {
-        let model = makeModel()
-        model.handleManual(host: "user@evil.example", code: "abc")
-        XCTAssertNil(model.pending)
-        XCTAssertNotNil(model.error)
-    }
-
-    @MainActor
-    func test_handleManual_emptyFields_setsError_noPending() {
-        let model = makeModel()
-        model.handleManual(host: "", code: "")
-        XCTAssertNil(model.pending)
-        XCTAssertNotNil(model.error)
-
-        model.handleManual(host: "proxy.example.com", code: "   ")
-        XCTAssertNil(model.pending)
-        XCTAssertNotNil(model.error)
     }
 }

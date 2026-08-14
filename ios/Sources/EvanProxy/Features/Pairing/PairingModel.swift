@@ -34,11 +34,12 @@ final class PairingModel {
         return (host, code)
     }
 
-    /// host:port only — reject anything that could smuggle a path,
-    /// userinfo, or query into the https URL built from it.
+    /// host:port only — reject anything that could smuggle a path, userinfo,
+    /// query, or a percent-encoded version of those into the https URL built
+    /// from it. (`%` never appears in a legit host: the QR path pre-decodes.)
     nonisolated static func isValidHost(_ host: String) -> Bool {
         !host.isEmpty
-            && !host.contains(where: { "/@?# \\".contains($0) })
+            && !host.contains(where: { "/@?#% \\".contains($0) })
             && URL(string: "https://\(host)")?.host() != nil
     }
 
@@ -91,20 +92,28 @@ final class PairingModel {
 
     func cancelPending() { pending = nil }
 
-    /// Manual fallback for when the camera is unavailable or declined: stage a
-    /// typed host + code for the same user confirmation as a scanned link.
-    /// Forgives pasted extras (whitespace, an `https://` prefix, a trailing `/`).
-    func handleManual(host rawHost: String, code rawCode: String) {
-        error = nil
+    /// Manual fallback for when the camera is unavailable or declined.
+    /// Validates typed input, forgiving pasted extras (whitespace, an
+    /// `https://`/`http://` prefix, trailing slashes). Returns nil if invalid.
+    /// Stages nothing — the sheet calls `stage(_:)` after it has dismissed,
+    /// because setting `pending` mid-dismissal can drop the confirmation alert.
+    nonisolated static func validateManual(host rawHost: String, code rawCode: String) -> PendingPair? {
         var host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        if host.lowercased().hasPrefix("https://") { host = String(host.dropFirst(8)) }
-        if host.hasSuffix("/") { host = String(host.dropLast()) }
-        let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.isValidHost(host), !code.isEmpty else {
-            error = "Invalid server address or code"
-            return
+        for scheme in ["https://", "http://"] where host.lowercased().hasPrefix(scheme) {
+            host = String(host.dropFirst(scheme.count))
+            break
         }
-        pending = PendingPair(host: host, code: code)
+        while host.hasSuffix("/") { host = String(host.dropLast()) }
+        let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isValidHost(host), !code.isEmpty else { return nil }
+        return PendingPair(host: host, code: code)
+    }
+
+    /// Stage a validated manual pair for the same user confirmation a scanned
+    /// link gets.
+    func stage(_ p: PendingPair) {
+        error = nil
+        pending = p
     }
 
     func handle(scanned: String) async {
