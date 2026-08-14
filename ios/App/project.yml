@@ -28,6 +28,12 @@ targets:
         # Home-LAN admin app: the server is typically plain http on the local network.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        NSCameraUsageDescription: >-
+          The camera scans the pairing QR code shown in the evan-proxy admin
+          "devices" panel.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.evanproxy.pair
+            CFBundleURLSchemes: [evanproxy]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.evanproxy.app

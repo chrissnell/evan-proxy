@@ -22,7 +22,17 @@ enum APIClientFactory {
         let client = Client(
             serverURL: base,
             transport: transport,
-            middlewares: [ReauthMiddleware { try await auth.reauthenticate() }]
+            middlewares: [
+                // Paired installs authenticate with the device token; a 401 means
+                // it was revoked, so drop back to the pairing/login screen.
+                BearerAuthMiddleware(
+                    token: { auth.currentDeviceToken() },
+                    onRevoked: { await auth.unpair() }
+                ),
+                // Legacy password installs re-login once on 401 (throws — and
+                // leaves the 401 intact — when no credentials are stored).
+                ReauthMiddleware { try await auth.reauthenticate() },
+            ]
         )
         // Wire AuthStore's login side-effect to a real /api/login call.
         auth.loginFn = { username, password in

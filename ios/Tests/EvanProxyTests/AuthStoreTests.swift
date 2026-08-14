@@ -9,6 +9,7 @@ final class AuthStoreTests: XCTestCase {
     override func tearDown() {
         try? Keychain(service: "com.evanproxy.authtests").remove("username")
         try? Keychain(service: "com.evanproxy.authtests").remove("password")
+        try? Keychain(service: "com.evanproxy.authtests").remove("deviceToken")
         super.tearDown()
     }
 
@@ -52,6 +53,46 @@ final class AuthStoreTests: XCTestCase {
         store.logout()
         XCTAssertFalse(store.isAuthenticated)
         XCTAssertFalse(store.hasStoredCredentials)
+    }
+
+    func test_storePairing_storesToken_dropsPassword_marksAuthenticated() async throws {
+        let store = makeStore()
+        store.loginFn = { _, _ in }
+        try await store.login(username: "evan", password: "pw")   // legacy install
+        try store.storePairing(token: "tok123")
+        XCTAssertTrue(store.isAuthenticated)
+        XCTAssertTrue(store.hasDeviceToken)
+        XCTAssertEqual(store.currentDeviceToken(), "tok123")
+        XCTAssertFalse(store.hasStoredCredentials)                // password is gone
+    }
+
+    func test_unpair_clearsToken_andUnauthenticates() throws {
+        let store = makeStore()
+        try store.storePairing(token: "tok123")
+        store.unpair()
+        XCTAssertFalse(store.isAuthenticated)
+        XCTAssertFalse(store.hasDeviceToken)
+        XCTAssertNil(store.currentDeviceToken())
+    }
+
+    func test_resumePairedSession_authenticatesOnlyWithToken() throws {
+        let store = makeStore()
+        store.resumePairedSession()
+        XCTAssertFalse(store.isAuthenticated)     // nothing stored yet
+        try store.storePairing(token: "tok123")
+        store.unpair()
+        store.resumePairedSession()
+        XCTAssertFalse(store.isAuthenticated)     // unpaired
+        try store.storePairing(token: "tok456")
+        store.resumePairedSession()
+        XCTAssertTrue(store.isAuthenticated)
+    }
+
+    func test_logout_alsoClearsDeviceToken() throws {
+        let store = makeStore()
+        try store.storePairing(token: "tok123")
+        store.logout()
+        XCTAssertFalse(store.hasDeviceToken)
     }
 }
 
