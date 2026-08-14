@@ -12,6 +12,11 @@ final class ScannerGateTests: XCTestCase {
                        .missingUsageDescription)
     }
 
+    func test_whitespaceOnlyUsageDescription_blocksScanner() {
+        XCTAssertEqual(ScannerGate.evaluate(usageDescription: "  \n ", hasCamera: true),
+                       .missingUsageDescription)
+    }
+
     func test_noCamera_reportsNoCamera() {
         XCTAssertEqual(ScannerGate.evaluate(usageDescription: "scan the pairing QR", hasCamera: false),
                        .noCamera)

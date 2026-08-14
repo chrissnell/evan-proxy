@@ -4,10 +4,12 @@ import AVFoundation
 /// Camera preview that reports the first QR code it sees, exactly once.
 struct QRScannerView: UIViewControllerRepresentable {
     let onScan: (String) -> Void
+    let onManualEntry: () -> Void
 
     func makeUIViewController(context: Context) -> ScannerViewController {
         let vc = ScannerViewController()
         vc.onScan = onScan
+        vc.onManualEntry = onManualEntry
         return vc
     }
     func updateUIViewController(_ vc: ScannerViewController, context: Context) {}
@@ -25,13 +27,15 @@ enum ScannerGate: Equatable {
     case noCamera
 
     static func evaluate(usageDescription: String?, hasCamera: Bool) -> ScannerGate {
-        guard let d = usageDescription, !d.isEmpty else { return .missingUsageDescription }
+        let d = usageDescription?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !d.isEmpty else { return .missingUsageDescription }
         return hasCamera ? .ready : .noCamera
     }
 }
 
 final class ScannerViewController: UIViewController, @preconcurrency AVCaptureMetadataOutputObjectsDelegate {
     var onScan: ((String) -> Void)?
+    var onManualEntry: (() -> Void)?
     private let session = AVCaptureSession()
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var scanned = false
@@ -44,10 +48,10 @@ final class ScannerViewController: UIViewController, @preconcurrency AVCaptureMe
             hasCamera: AVCaptureDevice.default(for: .video) != nil)
         switch gate {
         case .missingUsageDescription:
-            showMessage("This build was made from a stale Xcode project and can't use the camera —\nrun \"xcodegen generate\" in ios/App and rebuild,\nor enter the code manually")
+            showMessage("This build can't use the camera — enter the code manually instead. (Developers: the Xcode project is stale; run xcodegen generate in ios/App and rebuild.)")
             return
         case .noCamera:
-            showMessage("No camera on this device —\nenter the code manually instead")
+            showMessage("No camera on this device — enter the code manually instead")
             return
         case .ready:
             break
@@ -88,7 +92,7 @@ final class ScannerViewController: UIViewController, @preconcurrency AVCaptureMe
     }
 
     private func showDenied() {
-        showMessage("Camera access denied —\nenable it in Settings to scan")
+        showMessage("Camera access denied — enable it in Settings to scan, or enter the code manually")
     }
 
     private func showMessage(_ text: String) {
@@ -98,12 +102,27 @@ final class ScannerViewController: UIViewController, @preconcurrency AVCaptureMe
         label.textAlignment = .center
         label.textColor = .white
         label.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(label)
+
+        var config = UIButton.Configuration.bordered()
+        config.attributedTitle = AttributedString(
+            "Enter Code Manually",
+            attributes: AttributeContainer([.font: UIFont.monospacedSystemFont(ofSize: 14, weight: .semibold)]))
+        let button = UIButton(configuration: config, primaryAction: UIAction { [weak self] _ in
+            self?.onManualEntry?()
+        })
+        button.tintColor = .white
+
+        let stack = UIStackView(arrangedSubviews: [label, button])
+        stack.axis = .vertical
+        stack.spacing = 16
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
         NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            label.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 20),
+            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20),
         ])
     }
 
