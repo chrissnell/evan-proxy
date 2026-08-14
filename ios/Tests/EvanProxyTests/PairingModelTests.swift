@@ -77,4 +77,50 @@ final class PairingModelTests: XCTestCase {
         model.cancelPending()
         XCTAssertNil(model.pending)
     }
+
+    // MARK: Manual entry — camera-free fallback goes through the same staging
+
+    @MainActor
+    func test_handleManual_valid_stagesPending() {
+        let model = makeModel()
+        model.handleManual(host: "proxy.example.com:8443", code: "abc123")
+        XCTAssertEqual(model.pending, PendingPair(host: "proxy.example.com:8443", code: "abc123"))
+        XCTAssertNil(model.error)
+        XCTAssertFalse(model.auth.hasDeviceToken)   // still needs confirmation
+    }
+
+    @MainActor
+    func test_handleManual_forgivesWhitespaceSchemeAndTrailingSlash() {
+        let model = makeModel()
+        model.handleManual(host: "  https://proxy.example.com/  ", code: " abc123\n")
+        XCTAssertEqual(model.pending, PendingPair(host: "proxy.example.com", code: "abc123"))
+    }
+
+    @MainActor
+    func test_handleManual_hostWithPath_setsError_noPending() {
+        let model = makeModel()
+        model.handleManual(host: "evil.example/path", code: "abc")
+        XCTAssertNil(model.pending)
+        XCTAssertNotNil(model.error)
+    }
+
+    @MainActor
+    func test_handleManual_hostWithUserinfo_setsError_noPending() {
+        let model = makeModel()
+        model.handleManual(host: "user@evil.example", code: "abc")
+        XCTAssertNil(model.pending)
+        XCTAssertNotNil(model.error)
+    }
+
+    @MainActor
+    func test_handleManual_emptyFields_setsError_noPending() {
+        let model = makeModel()
+        model.handleManual(host: "", code: "")
+        XCTAssertNil(model.pending)
+        XCTAssertNotNil(model.error)
+
+        model.handleManual(host: "proxy.example.com", code: "   ")
+        XCTAssertNil(model.pending)
+        XCTAssertNotNil(model.error)
+    }
 }

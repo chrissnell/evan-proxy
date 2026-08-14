@@ -27,14 +27,19 @@ final class PairingModel {
     nonisolated static func parse(_ url: URL) throws -> (host: String, code: String) {
         guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
               comps.scheme == "evanproxy", comps.host == "pair",
-              let host = comps.queryItems?.first(where: { $0.name == "host" })?.value, !host.isEmpty,
+              let host = comps.queryItems?.first(where: { $0.name == "host" })?.value,
               let code = comps.queryItems?.first(where: { $0.name == "code" })?.value, !code.isEmpty,
-              // host:port only — reject anything that could smuggle a path,
-              // userinfo, or query into the https URL built from it.
-              !host.contains(where: { "/@?# \\".contains($0) }),
-              URL(string: "https://\(host)")?.host() != nil
+              isValidHost(host)
         else { throw PairingError.invalidLink }
         return (host, code)
+    }
+
+    /// host:port only — reject anything that could smuggle a path,
+    /// userinfo, or query into the https URL built from it.
+    nonisolated static func isValidHost(_ host: String) -> Bool {
+        !host.isEmpty
+            && !host.contains(where: { "/@?# \\".contains($0) })
+            && URL(string: "https://\(host)")?.host() != nil
     }
 
     /// Redeem the enrollment code at `https://<host>/api/pair`, store the bearer
@@ -85,6 +90,22 @@ final class PairingModel {
     }
 
     func cancelPending() { pending = nil }
+
+    /// Manual fallback for when the camera is unavailable or declined: stage a
+    /// typed host + code for the same user confirmation as a scanned link.
+    /// Forgives pasted extras (whitespace, an `https://` prefix, a trailing `/`).
+    func handleManual(host rawHost: String, code rawCode: String) {
+        error = nil
+        var host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        if host.lowercased().hasPrefix("https://") { host = String(host.dropFirst(8)) }
+        if host.hasSuffix("/") { host = String(host.dropLast()) }
+        let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isValidHost(host), !code.isEmpty else {
+            error = "Invalid server address or code"
+            return
+        }
+        pending = PendingPair(host: host, code: code)
+    }
 
     func handle(scanned: String) async {
         guard let url = URL(string: scanned) else {
