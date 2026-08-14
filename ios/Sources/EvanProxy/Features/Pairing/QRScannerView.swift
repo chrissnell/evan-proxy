@@ -13,6 +13,23 @@ struct QRScannerView: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: ScannerViewController, context: Context) {}
 }
 
+/// Preflight for the scanner, decided before ANY AVFoundation permission call:
+/// requesting camera access from a build whose Info.plist lost
+/// NSCameraUsageDescription (a stale xcodegen generation — Generated/ is
+/// gitignored) is an instant TCC crash, and the simulator has no camera to
+/// scan with at all. Both must degrade to "enter the code manually", not crash
+/// or show a silent black sheet.
+enum ScannerGate: Equatable {
+    case ready
+    case missingUsageDescription
+    case noCamera
+
+    static func evaluate(usageDescription: String?, hasCamera: Bool) -> ScannerGate {
+        guard let d = usageDescription, !d.isEmpty else { return .missingUsageDescription }
+        return hasCamera ? .ready : .noCamera
+    }
+}
+
 final class ScannerViewController: UIViewController, @preconcurrency AVCaptureMetadataOutputObjectsDelegate {
     var onScan: ((String) -> Void)?
     private let session = AVCaptureSession()
@@ -22,6 +39,19 @@ final class ScannerViewController: UIViewController, @preconcurrency AVCaptureMe
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        let gate = ScannerGate.evaluate(
+            usageDescription: Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") as? String,
+            hasCamera: AVCaptureDevice.default(for: .video) != nil)
+        switch gate {
+        case .missingUsageDescription:
+            showMessage("This build was made from a stale Xcode project and can't use the camera —\nrun \"xcodegen generate\" in ios/App and rebuild,\nor enter the code manually")
+            return
+        case .noCamera:
+            showMessage("No camera on this device —\nenter the code manually instead")
+            return
+        case .ready:
+            break
+        }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             configureSession()
@@ -58,8 +88,12 @@ final class ScannerViewController: UIViewController, @preconcurrency AVCaptureMe
     }
 
     private func showDenied() {
+        showMessage("Camera access denied —\nenable it in Settings to scan")
+    }
+
+    private func showMessage(_ text: String) {
         let label = UILabel()
-        label.text = "Camera access denied —\nenable it in Settings to scan"
+        label.text = text
         label.numberOfLines = 0
         label.textAlignment = .center
         label.textColor = .white
