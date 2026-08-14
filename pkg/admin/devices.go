@@ -16,8 +16,21 @@ import (
 )
 
 // pairURL builds the evanproxy://pair deep link a device scans to enroll.
-func pairURL(host, code string) string {
-	return "evanproxy://pair?host=" + url.QueryEscape(host) + "&code=" + url.QueryEscape(code)
+// The scheme rides along so devices can reach plain-http servers; the app
+// treats a missing scheme as https.
+func pairURL(scheme, host, code string) string {
+	return "evanproxy://pair?scheme=" + url.QueryEscape(scheme) +
+		"&host=" + url.QueryEscape(host) + "&code=" + url.QueryEscape(code)
+}
+
+// requestScheme reports how the admin request arrived, honoring a TLS
+// terminator's X-Forwarded-Proto. The device must pair over the same scheme
+// the admin panel is served on.
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		return "https"
+	}
+	return "http"
 }
 
 // handleEnroll manages device enrollment codes (admin session required).
@@ -30,7 +43,7 @@ func (a *api) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"code":       code,
-			"pair_url":   pairURL(r.Host, code),
+			"pair_url":   pairURL(requestScheme(r), r.Host, code),
 			"expires_in": int(a.enroll.ttl.Seconds()),
 		})
 	case http.MethodGet:
@@ -39,7 +52,7 @@ func (a *api) handleEnroll(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unknown or expired code", http.StatusNotFound)
 			return
 		}
-		svg, err := qrSVG(pairURL(r.Host, code))
+		svg, err := qrSVG(pairURL(requestScheme(r), r.Host, code))
 		if err != nil {
 			a.logger.Errorf("admin", "render enroll QR: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)

@@ -4,8 +4,10 @@ import OpenAPIURLSession
 
 @MainActor
 enum APIClientFactory {
-    /// One URLSession shared by the generated client, pairing, and the SSE log stream.
-    static let session = URLSession(configuration: .default)
+    /// One URLSession shared by the generated client, pairing, and the SSE log
+    /// stream — so the TOFU trust delegate governs every connection.
+    static let trustDelegate = TOFUSessionDelegate()
+    static let session = URLSession(configuration: .default, delegate: trustDelegate, delegateQueue: nil)
 
     /// Build a client bound to the paired server, authenticating with the
     /// device bearer token.

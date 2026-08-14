@@ -74,7 +74,7 @@ struct ManualPairSheet: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .font(Typography.mono(14)).padding(8)
                         .overlay(RoundedRectangle(cornerRadius: 2).stroke(Palette.border))
-                    Text("The code is shown under the QR in the admin \"Devices\" panel")
+                    Text("The code is shown under the QR in the admin \"Devices\" panel. Prefix the server with http:// if it has no TLS")
                         .font(Typography.mono(11)).foregroundStyle(Palette.fgDim)
                     if let e = error {
                         Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger)

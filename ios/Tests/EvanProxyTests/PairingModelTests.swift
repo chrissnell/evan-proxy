@@ -7,6 +7,20 @@ final class PairingModelTests: XCTestCase {
         let p = try PairingModel.parse(url)
         XCTAssertEqual(p.host, "proxy.example.com")
         XCTAssertEqual(p.code, "abc123")
+        XCTAssertEqual(p.scheme, "https")   // https unless the link says otherwise
+    }
+
+    func testParsePairURL_httpScheme() throws {
+        let url = URL(string: "evanproxy://pair?scheme=http&host=192.168.1.5%3A8080&code=abc")!
+        let p = try PairingModel.parse(url)
+        XCTAssertEqual(p, PendingPair(host: "192.168.1.5:8080", code: "abc", scheme: "http"))
+    }
+
+    func testParsePairURL_unknownScheme_throws() {
+        for bad in ["file", "ftp", "evanproxy", ""] {
+            let url = URL(string: "evanproxy://pair?scheme=\(bad)&host=proxy.example.com&code=abc")!
+            XCTAssertThrowsError(try PairingModel.parse(url), "scheme \(bad) must be rejected")
+        }
     }
 
     func testParsePairURL_hostWithPort() throws {
@@ -89,9 +103,15 @@ final class PairingModelTests: XCTestCase {
         XCTAssertEqual(
             PairingModel.validateManual(host: "  https://proxy.example.com/  ", code: " abc123\n"),
             PendingPair(host: "proxy.example.com", code: "abc123"))
+    }
+
+    func test_validateManual_preservesTypedHTTPScheme() {
         XCTAssertEqual(
             PairingModel.validateManual(host: "http://proxy.example.com", code: "abc"),
-            PendingPair(host: "proxy.example.com", code: "abc"))
+            PendingPair(host: "proxy.example.com", code: "abc", scheme: "http"))
+        XCTAssertEqual(
+            PairingModel.validateManual(host: "HTTP://192.168.1.5:8080/", code: "abc"),
+            PendingPair(host: "192.168.1.5:8080", code: "abc", scheme: "http"))
     }
 
     func test_validateManual_rejectsUnsafeHosts() {
@@ -107,6 +127,13 @@ final class PairingModelTests: XCTestCase {
         XCTAssertNil(PairingModel.validateManual(host: "proxy.example.com", code: "   "))
         // Reduces to empty after forgiveness.
         XCTAssertNil(PairingModel.validateManual(host: "https:///", code: "abc"))
+    }
+
+    func test_pendingPair_baseURLString_carriesScheme() {
+        XCTAssertEqual(PendingPair(host: "proxy.example.com", code: "a").baseURLString,
+                       "https://proxy.example.com")
+        XCTAssertEqual(PendingPair(host: "192.168.1.5:8080", code: "a", scheme: "http").baseURLString,
+                       "http://192.168.1.5:8080")
     }
 
     @MainActor

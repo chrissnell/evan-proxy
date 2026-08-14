@@ -81,6 +81,10 @@ func TestEnrollPairAndBearerAuth(t *testing.T) {
 	if !strings.HasPrefix(enr.PairURL, "evanproxy://pair?") || !strings.Contains(enr.PairURL, "code="+enr.Code) {
 		t.Fatalf("bad pair_url: %q", enr.PairURL)
 	}
+	// httptest requests are plain http, so the link must say so.
+	if !strings.Contains(enr.PairURL, "scheme=http&") {
+		t.Fatalf("pair_url missing http scheme: %q", enr.PairURL)
+	}
 
 	// The device redeems the code for a bearer token — no session.
 	w = httptest.NewRecorder()
@@ -192,5 +196,29 @@ func TestEnrollQR(t *testing.T) {
 	a.requireAdminSession(a.handleEnroll)(w, sessionRequest(a, http.MethodGet, "/api/devices/enroll?code=bogus", ""))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("bogus QR code: want 404, got %d", w.Code)
+	}
+}
+
+func TestRequestScheme(t *testing.T) {
+	plain := httptest.NewRequest(http.MethodGet, "/api/devices/enroll", nil)
+	if got := requestScheme(plain); got != "http" {
+		t.Fatalf("plain request: want http, got %q", got)
+	}
+	tls := httptest.NewRequest(http.MethodGet, "https://x/api/devices/enroll", nil)
+	if got := requestScheme(tls); got != "https" {
+		t.Fatalf("TLS request: want https, got %q", got)
+	}
+	fwd := httptest.NewRequest(http.MethodGet, "/api/devices/enroll", nil)
+	fwd.Header.Set("X-Forwarded-Proto", "https")
+	if got := requestScheme(fwd); got != "https" {
+		t.Fatalf("forwarded request: want https, got %q", got)
+	}
+}
+
+func TestPairURL_EscapesAndCarriesScheme(t *testing.T) {
+	got := pairURL("http", "192.168.1.5:8080", "ab/cd")
+	want := "evanproxy://pair?scheme=http&host=192.168.1.5%3A8080&code=ab%2Fcd"
+	if got != want {
+		t.Fatalf("pairURL:\n got %q\nwant %q", got, want)
 	}
 }
