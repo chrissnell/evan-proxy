@@ -7,6 +7,7 @@ struct PairingView: View {
     let pairing: PairingModel
     @State private var showScanner = false
     @State private var showManual = false
+    @State private var manualRequested = false
     @State private var staged: PendingPair?
 
     var body: some View {
@@ -28,11 +29,21 @@ struct PairingView: View {
         }
         .padding(20).frame(maxHeight: .infinity)
         .background(Palette.bg).foregroundStyle(Palette.fg)
-        .sheet(isPresented: $showScanner) {
-            QRScannerView { code in
-                showScanner = false
-                Task { await pairing.handle(scanned: code) }
-            }
+        // The scanner's fallback button hands off to the manual sheet via
+        // onDismiss for the same reason staging does below: presenting the
+        // next sheet mid-dismissal gets dropped by SwiftUI.
+        .sheet(isPresented: $showScanner, onDismiss: {
+            if manualRequested { manualRequested = false; showManual = true }
+        }) {
+            QRScannerView(
+                onScan: { code in
+                    showScanner = false
+                    Task { await pairing.handle(scanned: code) }
+                },
+                onManualEntry: {
+                    manualRequested = true
+                    showScanner = false
+                })
             .ignoresSafeArea()
         }
         // Staging waits for onDismiss: setting `pending` while the sheet is
