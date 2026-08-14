@@ -11,12 +11,12 @@ struct PairingView: View {
             Text("evan-proxy").font(Typography.mono(22, weight: .bold)).foregroundStyle(Palette.fg)
             Box {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("pair this device —\nscan the QR from the admin \"devices\" panel")
+                    Text("Pair this device —\nscan the QR from the admin \"Devices\" panel")
                         .font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
                     if let e = pairing.error {
                         Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger)
                     }
-                    PillButton(title: pairing.busy ? "…" : "scan qr to pair", color: Palette.accent) {
+                    PillButton(title: pairing.busy ? "…" : "Scan QR to Pair", color: Palette.accent) {
                         showScanner = true
                     }
                 }
