@@ -4,44 +4,24 @@ import OpenAPIURLSession
 
 @MainActor
 enum APIClientFactory {
-    /// One cookie-persisting URLSession for the whole app (carries evan-proxy-session).
-    static let session: URLSession = {
-        let cfg = URLSessionConfiguration.default
-        cfg.httpCookieStorage = .shared
-        cfg.httpCookieAcceptPolicy = .always
-        cfg.httpShouldSetCookies = true
-        return URLSession(configuration: cfg)
-    }()
+    /// One URLSession shared by the generated client, pairing, and the SSE log stream.
+    static let session = URLSession(configuration: .default)
 
-    /// Build a client bound to the configured server and an AuthStore for reauth.
+    /// Build a client bound to the paired server, authenticating with the
+    /// device bearer token.
     static func make(auth: AuthStore) throws -> Client {
         guard let base = ServerConfig.baseURL else { throw AuthError.notConfigured }
-        let transport = URLSessionTransport(
-            configuration: .init(session: session)
-        )
-        let client = Client(
+        return Client(
             serverURL: base,
-            transport: transport,
+            transport: URLSessionTransport(configuration: .init(session: session)),
             middlewares: [
-                // Paired installs authenticate with the device token; a 401 means
-                // it was revoked, so drop back to the pairing/login screen.
+                // A 401 means the token was revoked — unpair back to the
+                // pairing screen; there is no password fallback on the device.
                 BearerAuthMiddleware(
                     token: { auth.currentDeviceToken() },
                     onRevoked: { await auth.unpair() }
-                ),
-                // Legacy password installs re-login once on 401 (throws — and
-                // leaves the 401 intact — when no credentials are stored).
-                ReauthMiddleware { try await auth.reauthenticate() },
+                )
             ]
         )
-        // Wire AuthStore's login side-effect to a real /api/login call.
-        auth.loginFn = { username, password in
-            let resp = try await client.login(body: .json(.init(username: username, password: password)))
-            switch resp {
-            case .ok: return
-            default:  throw AuthError.invalidCredentials
-            }
-        }
-        return client
     }
 }

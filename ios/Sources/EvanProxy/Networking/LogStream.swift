@@ -53,24 +53,24 @@ enum SSEParser {
 @MainActor
 struct LogStream {
     let baseURL: URL
-    var reauth: (@Sendable () async -> Void)?
+    var onAuthFailure: (@Sendable () async -> Void)?
     /// Device bearer token for QR-paired installs (the SSE request bypasses the
     /// generated client, so the middleware can't add the header for us).
     var bearer: (@Sendable () -> String?)?
 
     init(baseURL: URL,
-         reauth: (@Sendable () async -> Void)? = nil,
+         onAuthFailure: (@Sendable () async -> Void)? = nil,
          bearer: (@Sendable () -> String?)? = nil) {
         self.baseURL = baseURL
-        self.reauth = reauth
+        self.onAuthFailure = onAuthFailure
         self.bearer = bearer
     }
 
     /// Open the SSE endpoint and yield entries until cancelled.
-    /// Reconnects with backoff on drop; re-authenticates on 401 before retrying.
+    /// Reconnects with backoff on drop; reports a 401 (revoked token) via onAuthFailure.
     func connect() -> AsyncThrowingStream<Components.Schemas.LogEntry, Error> {
         let url = baseURL.appendingPathComponent("api/logs")
-        let reauth = self.reauth
+        let onAuthFailure = self.onAuthFailure
         let bearer = self.bearer
         return AsyncThrowingStream { cont in
             let task = Task {
@@ -84,7 +84,7 @@ struct LogStream {
                         }
                         let (bytes, resp) = try await APIClientFactory.session.bytes(for: req)
                         if (resp as? HTTPURLResponse)?.statusCode == 401 {
-                            await reauth?()
+                            await onAuthFailure?()
                         } else {
                             for try await entry in SSEParser.entries(from: bytes.lines) {
                                 delay = 1.0
