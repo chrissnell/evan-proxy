@@ -16,15 +16,16 @@ public struct RootView: View {
 
     public var body: some View {
         Group {
-            if baseURLString == nil {
-                NavigationStack { SettingsView(auth: auth) }
-            } else if !auth.isAuthenticated {
-                LoginView(model: LoginModel(auth: auth), pairing: pairing)
+            if !auth.isAuthenticated {
+                PairingView(pairing: pairing)
             } else if let client {
                 MainTabs(client: client, auth: auth)
             } else { Color.clear.onAppear(perform: build) }
         }
-        .task { await trySilentLogin() }
+        .task {
+            build()
+            auth.resumePairedSession()
+        }
         .onChange(of: baseURLString) { build() }
         // `evanproxy://pair` deep link — works from the stock Camera app too.
         .onOpenURL { url in Task { await pairing.handle(url) } }
@@ -37,18 +38,10 @@ public struct RootView: View {
             Button("cancel", role: .cancel) {}
             Button("pair") { Task { await pairing.confirm(p) } }
         } message: { p in
-            Text("this points the app at \(p.host) and replaces the current server and login on this device")
+            Text("this points the app at \(p.host) and replaces the current server and pairing on this device")
         }
     }
     private func build() { client = try? APIClientFactory.make(auth: auth) }
-    private func trySilentLogin() async {
-        build()
-        if auth.hasDeviceToken {
-            auth.resumePairedSession()            // QR-paired: bearer token, no password
-        } else if auth.hasStoredCredentials {
-            try? await auth.reauthenticate()      // legacy install: "log in once"
-        }
-    }
 }
 
 struct MainTabs: View {
@@ -74,15 +67,11 @@ struct MainTabs: View {
                 .tabItem { Label("users", systemImage: "person.2.fill") }
             LogsView(model: .init(stream: LogStream(
                 baseURL: ServerConfig.baseURL!,
-                // Paired installs have no password to retry with: a 401 means
-                // the token was revoked, so unpair back to the pairing screen.
-                reauth: {
-                    if await auth.hasDeviceToken { await auth.unpair() }
-                    else { try? await auth.reauthenticate() }
-                },
+                // A 401 means the token was revoked — unpair back to pairing.
+                onAuthFailure: { await auth.unpair() },
                 bearer: { auth.currentDeviceToken() })))
                 .tabItem { Label("logs", systemImage: "terminal.fill") }
-            NavigationStack { SettingsView(auth: auth, client: client) }
+            NavigationStack { SettingsView(auth: auth) }
                 .tabItem { Label("settings", systemImage: "gearshape.fill") }
         }
         .tint(Palette.accent)
