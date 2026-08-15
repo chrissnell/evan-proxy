@@ -144,3 +144,18 @@ func TestTopN(t *testing.T) {
 		t.Errorf("expected [c, a], got [%s, %s]", top[0].Host, top[1].Host)
 	}
 }
+
+// TestTraffic_EmptyIsNonNil guards the JSON shape: an idle collector must yield
+// a non-nil (empty) slice so it marshals to [] not null — the iOS app's
+// generated OpenAPI decoder rejects null for the non-nullable traffic array.
+func TestTraffic_EmptyIsNonNil(t *testing.T) {
+	c := NewCollector()
+	defer c.Stop()
+	got := c.Traffic(60)
+	if got == nil {
+		t.Fatal("Traffic() on an idle collector must be non-nil (marshals to [] not null)")
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 buckets on an idle collector, got %d", len(got))
+	}
+}
