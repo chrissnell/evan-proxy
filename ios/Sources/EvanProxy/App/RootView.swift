@@ -79,7 +79,7 @@ struct MainTabs: View {
                 onAuthFailure: { await auth.unpair() },
                 bearer: { auth.currentDeviceToken() })))
                 .tabItem { Label("Logs", systemImage: "terminal.fill") }
-            NavigationStack { SettingsView(auth: auth) }
+            NavigationStack { SettingsView(auth: auth, client: client) }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .tint(Palette.accent)

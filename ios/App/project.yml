@@ -27,7 +27,7 @@ targets:
     info:
       path: Generated/Info.plist
       properties:
-        CFBundleDisplayName: Evan Proxy
+        CFBundleDisplayName: evan-proxy
         UILaunchScreen: {}
         # Home-LAN admin app: the server is typically plain http on the local network.
         NSAppTransportSecurity:
