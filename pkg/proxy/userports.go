@@ -150,6 +150,15 @@ func (h *Handler) startListenerLocked(port int, username string) {
 
 	h.userServers[port] = srv
 
+	// Demo mode: record the listener for bookkeeping so the admin API and
+	// reconciler treat the port as active, but never bind a real socket. Used
+	// for App Store validation builds where the full API must work without
+	// opening any proxy ports. Not for the shipped release.
+	if h.cfg.DemoMode {
+		h.logger.Infof("userports", "demo mode: not binding :%d for %q (no real proxy listener)", port, username)
+		return
+	}
+
 	go func() {
 		h.logger.Infof("userports", "listening on :%d for %q", port, username)
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {

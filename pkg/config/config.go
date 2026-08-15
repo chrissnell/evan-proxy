@@ -84,6 +84,13 @@ type Config struct {
 	// only via `kubectl port-forward`. Off by default.
 	PProfEnabled bool
 	PProfListen  string // "host:port" — default "127.0.0.1:6060" (loopback only)
+
+	// DemoMode runs the full admin API and user-management flow without ever
+	// binding a real per-user proxy socket. Enabling a user's proxy updates the
+	// database and the API reports it as active, but no proxy listener opens and
+	// no traffic is forwarded. Intended only for Apple App Store validation
+	// builds — not for the shipped release.
+	DemoMode bool
 }
 
 func Load() (*Config, error) {
@@ -124,6 +131,7 @@ func Load() (*Config, error) {
 			[]string{"venmo.com", "paypal.com", "paypalobjects.com", "braintreegateway.com", "braintree-api.com"}),
 		PProfEnabled: envBool("PPROF_ENABLED", false),
 		PProfListen:  envOr("PPROF_LISTEN", "127.0.0.1:6060"),
+		DemoMode:     envBool("DEMO_MODE", false),
 	}
 
 	// Built-in autocert terminates TLS in-process, so cookies are always served

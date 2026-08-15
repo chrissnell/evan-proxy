@@ -24,6 +24,12 @@ logging:
     batchSize: 100       # json-http only: max entries before flush
     flushInterval: "5s"  # json-http only: max time between flushes
 
+# Demo / no-op mode for Apple App Store validation. When true, the full admin
+# API and per-user enable/disable flow work normally, but NO real per-user proxy
+# listeners are ever bound — enabling a user's proxy forwards no traffic. This is
+# a validation-only build; keep false for any real deployment.
+demoMode: false
+
 # Proxy configuration
 proxy:
   idleTimeout: "300s"
