@@ -29,6 +29,13 @@ targets:
       properties:
         CFBundleDisplayName: evan-proxy
         UILaunchScreen: {}
+        # App Store validation requires all four orientations for an
+        # iPad-multitasking-capable app; SwiftUI adapts to each.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         # No encryption beyond what Apple exempts (HTTPS/TLS only), so App Store
         # Connect never prompts for export-compliance docs on upload.
         ITSAppUsesNonExemptEncryption: false
