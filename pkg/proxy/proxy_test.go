@@ -638,3 +638,94 @@ func TestForwardWithPerUserDNS(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 }
+
+// buildHandler constructs a Handler with the given config for listener tests.
+func buildHandler(t *testing.T, cfg *config.Config) *Handler {
+	t.Helper()
+	dir := t.TempDir()
+	users, err := userdb.Open(filepath.Join(dir, "users.db"),
+		logging.New(logging.NewConsoleBackend(io.Discard, "human")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { users.Close() })
+	if _, err := users.Add("alice", "secret", cfg.UserPortMin, cfg.UserPortMax); err != nil {
+		t.Fatal(err)
+	}
+	limiter := ratelimit.New(10, time.Minute)
+	t.Cleanup(limiter.Stop)
+	logger := logging.New(logging.NewConsoleBackend(io.Discard, "human"))
+	collector := stats.NewCollector()
+	t.Cleanup(collector.Stop)
+	counter := stats.NewTrafficCounter(collector)
+	t.Cleanup(counter.Stop)
+	return New(cfg, users, users, users, users, users, acl.AllowAll{}, limiter, logger, counter, nil)
+}
+
+func baseListenerCfg() *config.Config {
+	return &config.Config{
+		AuthRetryTimeout:   5 * time.Second,
+		ConnectDialTimeout: 5 * time.Second,
+		IdleTimeout:        30 * time.Second,
+		HTTPTimeout:        10 * time.Second,
+		DNSProtocol:        "plain",
+		UserPortMin:        19081,
+		UserPortMax:        19090,
+	}
+}
+
+// TestDemoModeNoRealListener verifies that with DemoMode enabled, starting a
+// user listener registers bookkeeping but never binds a real socket.
+func TestDemoModeNoRealListener(t *testing.T) {
+	cfg := baseListenerCfg()
+	cfg.DemoMode = true
+	h := buildHandler(t, cfg)
+
+	const port = 19081
+	h.StartListener("alice", port)
+	t.Cleanup(func() { h.StopUserListener(port) })
+
+	// Bookkeeping must reflect the port as active for the admin API/reconciler.
+	h.portMu.RLock()
+	_, tracked := h.userServers[port]
+	owner := h.portUsers[port]
+	h.portMu.RUnlock()
+	if !tracked {
+		t.Fatalf("expected port %d to be tracked in userServers", port)
+	}
+	if owner != "alice" {
+		t.Fatalf("expected port %d owner %q, got %q", port, "alice", owner)
+	}
+
+	// No real socket should be bound: a dial must fail.
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
+	if err == nil {
+		conn.Close()
+		t.Fatalf("demo mode: port %d unexpectedly accepted a connection", port)
+	}
+}
+
+// TestNonDemoModeBindsListener is the control: without DemoMode, a real socket
+// is bound and accepts connections.
+func TestNonDemoModeBindsListener(t *testing.T) {
+	cfg := baseListenerCfg()
+	h := buildHandler(t, cfg)
+
+	const port = 19082
+	h.StartListener("alice", port)
+	t.Cleanup(func() { h.StopUserListener(port) })
+
+	var conn net.Conn
+	var err error
+	for i := 0; i < 50; i++ {
+		conn, err = net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("expected port %d to accept a connection, got %v", port, err)
+	}
+	conn.Close()
+}

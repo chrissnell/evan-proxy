@@ -93,6 +93,10 @@ func main() {
 		cfg.MetricsListen == "",
 		cfg.ForceHTTPS)
 
+	if cfg.DemoMode {
+		logger.Infof("proxy", "DEMO MODE enabled: full admin API active, but no real per-user proxy listeners will bind")
+	}
+
 	// Per-user dedicated port listeners
 	if err := proxyHandler.StartUserListeners(); err != nil {
 		logger.Fatalf("proxy", "user listeners: %v", err)
