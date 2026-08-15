@@ -1,6 +1,6 @@
 name: EvanProxyApp
 options:
-  bundleIdPrefix: com.evanproxy
+  bundleIdPrefix: com.chrissnell
   deploymentTarget:
     iOS: "17.0"
   # Stamp what this generation was built from, so builds can detect a stale
@@ -43,7 +43,7 @@ targets:
             CFBundleURLSchemes: [evanproxy]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.evanproxy.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.chrissnell.evan-proxy
         # Apple Developer team (shared with RemoteWeather.app). Automatic signing
         # uses this to pick the distribution cert + provisioning profile.
         DEVELOPMENT_TEAM: 52CRC9LE38
