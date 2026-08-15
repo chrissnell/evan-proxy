@@ -63,6 +63,11 @@ data:
   PPROF_ENABLED: "true"
   PPROF_LISTEN: {{ .Values.debug.pprofListen | quote }}
   {{- end }}
+  {{- if .Values.demoMode }}
+  # Demo / no-op mode — full API, but no real per-user proxy listeners bind.
+  # App Store validation only; not for real deployments.
+  DEMO_MODE: "true"
+  {{- end }}
   {{- if .Values.timezone }}
   TZ: {{ .Values.timezone | quote }}
   {{- end }}
