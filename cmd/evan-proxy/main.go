@@ -94,8 +94,13 @@ func main() {
 		cfg.MetricsListen == "",
 		cfg.ForceHTTPS)
 
+	// In demo mode wrap the admin handler with an access log so client
+	// behaviour (e.g. App Store review pairing) can be diagnosed from the pod
+	// logs. Off in normal deployments — it logs every request path.
+	var adminHandler http.Handler = adminServer
 	if cfg.DemoMode {
 		logger.Infof("proxy", "DEMO MODE enabled: full admin API active, but no real per-user proxy listeners will bind")
+		adminHandler = admin.LogRequests(logger, adminServer)
 	}
 
 	// Per-user dedicated port listeners
@@ -107,7 +112,7 @@ func main() {
 	// Admin listener (no WriteTimeout -- SSE log streaming needs long-lived responses)
 	adminSrv := &http.Server{
 		Addr:        cfg.AdminListen,
-		Handler:     adminServer,
+		Handler:     adminHandler,
 		ReadTimeout: 10 * time.Second,
 		IdleTimeout: 120 * time.Second,
 	}
