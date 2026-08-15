@@ -48,7 +48,7 @@ func setupAPI(t *testing.T) *api {
 	limiter := ratelimit.New(3, time.Minute)
 	t.Cleanup(func() { limiter.Stop() })
 
-	enroll := newEnrollStore(5 * time.Minute)
+	enroll := newEnrollStore(5*time.Minute, false)
 	t.Cleanup(enroll.Stop)
 
 	return &api{

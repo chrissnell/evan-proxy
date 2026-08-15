@@ -40,11 +40,18 @@ func (a *api) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		code := a.enroll.create()
+		// In demo mode the code never expires and is reusable; signal that to
+		// the UI (persistent=true, expires_in=0) so it keeps the QR on screen.
+		expiresIn := int(a.enroll.ttl.Seconds())
+		if a.enroll.persistent {
+			expiresIn = 0
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"code":       code,
 			"pair_url":   pairURL(requestScheme(r), r.Host, code),
-			"expires_in": int(a.enroll.ttl.Seconds()),
+			"expires_in": expiresIn,
+			"persistent": a.enroll.persistent,
 		})
 	case http.MethodGet:
 		code := r.URL.Query().Get("code")
