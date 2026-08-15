@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     let auth: AuthStore
+    var client: Client?
+    @State private var serverVersion: String?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
@@ -27,26 +29,17 @@ struct SettingsView: View {
                 SectionHeader(title: "about")
                 Box {
                     VStack(alignment: .center, spacing: 12) {
-                        Text("Evan Proxy v\(appVersion)")
+                        Text("evan-proxy")
                             .font(Typography.mono(14, weight: .bold))
                             .foregroundStyle(Palette.fg)
+
+                        Text("app \(vPrefixed(appVersion)) · server \(serverVersion.map(vPrefixed) ?? "—")")
+                            .font(Typography.mono(12))
+                            .foregroundStyle(Palette.fgMuted)
 
                         Text("© 2026 Chris Snell")
                             .font(Typography.mono(12))
                             .foregroundStyle(Palette.fgMuted)
-
-                        VStack(spacing: 4) {
-                            Text("If you want to run your own filtering proxy, you can download the evan-proxy server software for free at")
-                                .font(Typography.mono(12))
-                                .foregroundStyle(Palette.fgMuted)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            Link("https://github.com/chrissnell/evan-proxy",
-                                 destination: URL(string: "https://github.com/chrissnell/evan-proxy")!)
-                                .font(Typography.mono(12))
-                                .foregroundStyle(Palette.accent)
-                        }
 
                         Spacer()
                             .frame(height: 8)
@@ -66,9 +59,18 @@ struct SettingsView: View {
                 }
             }.padding(12)
         }.background(Palette.bg).navigationTitle("Settings")
+        .task {
+            guard let client else { return }
+            serverVersion = try? await client.getVersion().ok.body.json.version
+        }
     }
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
+    /// "1.2.3" → "v1.2.3", but leave non-numeric versions like "dev" alone.
+    private func vPrefixed(_ s: String) -> String {
+        s.first?.isNumber == true ? "v\(s)" : s
     }
 }
