@@ -57,6 +57,7 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 		loginRetryAfter: strconv.Itoa(int(opts.LoginWindow.Seconds())),
 		secureCookies:   forceHTTPS,
 		enroll:          newEnrollStore(5*time.Minute, opts.DemoMode),
+		demoMode:        opts.DemoMode,
 	}
 
 	mux := http.NewServeMux()

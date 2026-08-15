@@ -596,3 +596,31 @@ func TestHandleLogs_FlushesHeadersImmediately(t *testing.T) {
 		t.Fatalf("expected an initial ': connected' SSE frame before any event, got %q", rec.Body.String())
 	}
 }
+
+// TestRequireSession_DemoModeBypassesAuth verifies the App Store demo build
+// serves requireSession endpoints without a token (so a paired app that can't
+// attach its token isn't bounced back to pairing), while the normal build still
+// requires auth.
+func TestRequireSession_DemoModeBypassesAuth(t *testing.T) {
+	a := setupAPI(t)
+	handler := a.requireSession(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Normal build: no auth → 401.
+	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("non-demo, no auth: want 401, got %d", w.Code)
+	}
+
+	// Demo build: no auth → served.
+	a.demoMode = true
+	req = httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	w = httptest.NewRecorder()
+	handler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("demo, no auth: want 200, got %d", w.Code)
+	}
+}
