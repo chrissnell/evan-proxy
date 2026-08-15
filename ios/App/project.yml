@@ -29,6 +29,9 @@ targets:
       properties:
         CFBundleDisplayName: evan-proxy
         UILaunchScreen: {}
+        # No encryption beyond what Apple exempts (HTTPS/TLS only), so App Store
+        # Connect never prompts for export-compliance docs on upload.
+        ITSAppUsesNonExemptEncryption: false
         # Home-LAN admin app: the server is typically plain http on the local network.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
@@ -41,8 +44,16 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.evanproxy.app
+        # Apple Developer team (shared with RemoteWeather.app). Automatic signing
+        # uses this to pick the distribution cert + provisioning profile.
+        DEVELOPMENT_TEAM: 52CRC9LE38
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Public version (CFBundleShortVersionString) and build number
+        # (CFBundleVersion). The build number must strictly increase on every
+        # App Store upload; bump CURRENT_PROJECT_VERSION for each new build.
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: 1
     preBuildScripts:
       # Generated/Info.plist is gitignored, so pulling a project.yml change
       # without re-running xcodegen silently ships a stale plist (this once
