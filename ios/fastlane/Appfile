@@ -1,0 +1,3 @@
+# Supplies identifiers so fastlane stops prompting.
+app_identifier("com.evanproxy.app")
+team_id("52CRC9LE38")            # same Apple Developer team as RemoteWeather.app
