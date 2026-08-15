@@ -39,6 +39,13 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        # The iPad-multitasking validator reads the ~ipad idiom key when
+        # present; declare it explicitly so the iPad build is unambiguous.
+        "UISupportedInterfaceOrientations~ipad":
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         # No encryption beyond what Apple exempts (HTTPS/TLS only), so App Store
         # Connect never prompts for export-compliance docs on upload.
         ITSAppUsesNonExemptEncryption: false
