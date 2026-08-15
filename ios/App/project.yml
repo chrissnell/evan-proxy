@@ -27,7 +27,10 @@ targets:
     info:
       path: Generated/Info.plist
       properties:
-        CFBundleDisplayName: evan-proxy
+        # Home-screen icon label and short name (App Store listing name is set
+        # separately in App Store Connect).
+        CFBundleDisplayName: "Evan Proxy"
+        CFBundleName: "Evan Proxy"
         UILaunchScreen: {}
         # App Store validation requires all four orientations for an
         # iPad-multitasking-capable app; SwiftUI adapts to each.
