@@ -596,3 +596,79 @@ func TestHandleLogs_FlushesHeadersImmediately(t *testing.T) {
 		t.Fatalf("expected an initial ': connected' SSE frame before any event, got %q", rec.Body.String())
 	}
 }
+
+// TestRequireSession_DemoModeBypassesAuth verifies the App Store demo build
+// serves requireSession endpoints without a token (so a paired app that can't
+// attach its token isn't bounced back to pairing), while the normal build still
+// requires auth.
+func TestRequireSession_DemoModeBypassesAuth(t *testing.T) {
+	a := setupAPI(t)
+	handler := a.requireSession(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Normal build: no auth → 401.
+	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	w := httptest.NewRecorder()
+	handler(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("non-demo, no auth: want 401, got %d", w.Code)
+	}
+
+	// Demo build: no auth → served.
+	a.demoMode = true
+	req = httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	w = httptest.NewRecorder()
+	handler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("demo, no auth: want 200, got %d", w.Code)
+	}
+}
+
+// TestRequireAdminSession_NotBypassedInDemo locks in the security boundary that
+// device-management endpoints stay cookie-gated even in demo mode — the demo
+// auth bypass must apply only to requireSession, never requireAdminSession.
+func TestRequireAdminSession_NotBypassedInDemo(t *testing.T) {
+	a := setupAPI(t)
+	a.demoMode = true
+	handler := a.requireAdminSession(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/devices", nil) // no session cookie
+	w := httptest.NewRecorder()
+	handler(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("demo mode must NOT bypass admin-session auth: want 401, got %d", w.Code)
+	}
+}
+
+// statusWriter must preserve http.Flusher so the access-log wrapper doesn't
+// break the /api/logs SSE stream.
+var _ http.Flusher = (*statusWriter)(nil)
+
+// TestLogRequests_PreservesFlusher verifies a handler wrapped by LogRequests can
+// still assert http.Flusher and stream — the property /api/logs depends on.
+func TestLogRequests_PreservesFlusher(t *testing.T) {
+	lg := logging.New(logging.NewConsoleBackend(io.Discard, "human"))
+	flushed := false
+	wrapped := LogRequests(lg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			t.Errorf("wrapped ResponseWriter does not implement http.Flusher")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(": open\n\n"))
+		f.Flush()
+		flushed = true
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+	w := httptest.NewRecorder()
+	wrapped.ServeHTTP(w, req)
+	if !flushed {
+		t.Fatal("handler did not reach Flush through the LogRequests wrapper")
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", w.Code)
+	}
+}

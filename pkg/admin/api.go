@@ -40,6 +40,7 @@ type api struct {
 	loginRetryAfter string         // Retry-After header value (seconds) for 429s
 	secureCookies   bool
 	enroll          *enrollStore // single-use device enrollment codes
+	demoMode        bool         // App Store demo: no-op instance; see requireSession
 }
 
 type loginRequest struct {
@@ -114,9 +115,16 @@ func (a *api) authed(r *http.Request) bool {
 
 // requireSession wraps a handler with authentication: session cookie or
 // device bearer token.
+//
+// Demo mode is a deliberate exception: the App Store validation build is a
+// no-op instance (no real proxying, fake users), and its whole purpose is to
+// let Apple exercise the app end to end. It serves these read/manage endpoints
+// without requiring auth so a paired app that fails to attach its token never
+// gets a 401 and never gets bounced back to pairing. Never enabled in a real
+// deployment. Device management (requireAdminSession) stays cookie-gated.
 func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !a.authed(r) {
+		if !a.demoMode && !a.authed(r) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
