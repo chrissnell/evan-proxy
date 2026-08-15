@@ -160,8 +160,10 @@ func (c *Collector) Traffic(count int) []TrafficBucket {
 		count = maxBuckets
 	}
 
-	// Collect non-zero buckets in chronological order
-	var result []TrafficBucket
+	// Collect non-zero buckets in chronological order. Non-nil so an idle
+	// server marshals to a JSON [] rather than null — strict clients (the iOS
+	// app's generated OpenAPI decoder) reject null for a non-nullable array.
+	result := make([]TrafficBucket, 0, maxBuckets)
 	for i := 0; i < maxBuckets; i++ {
 		idx := (c.bucketIdx + 1 + i) % maxBuckets
 		b := c.buckets[idx]

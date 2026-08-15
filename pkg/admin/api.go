@@ -600,14 +600,31 @@ func (a *api) handleLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
+	// Establish the stream immediately. Go doesn't send the response header until
+	// the first Write, so a quiet server (e.g. the no-traffic demo build) would
+	// otherwise leave the client hanging with no response headers until the first
+	// log event — which may never come. Flush an SSE comment (ignored by parsers)
+	// so the client sees 200 and an open stream right away.
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, ": connected\n\n")
+	flusher.Flush()
+
 	ch := a.stats.Subscribe()
 	defer a.stats.Unsubscribe(ch)
+
+	// Heartbeat keeps the connection alive through idle periods and intermediary
+	// proxies (e.g. Cloudflare) when there is no log traffic at all.
+	ping := time.NewTicker(25 * time.Second)
+	defer ping.Stop()
 
 	for {
 		select {
 		case entry := <-ch:
 			data, _ := json.Marshal(entry)
 			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		case <-ping.C:
+			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
 		case <-r.Context().Done():
 			return

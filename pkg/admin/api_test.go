@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"evan-proxy/pkg/auth"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/ratelimit"
+	"evan-proxy/pkg/stats"
 	"evan-proxy/pkg/userdb"
 
 	"golang.org/x/crypto/bcrypt"
@@ -564,5 +566,33 @@ func TestNormalizeDNSServer(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("normalizeDNSServer(%q, %q) = %q, want %q", tt.server, tt.proto, got, tt.want)
 		}
+	}
+}
+
+// TestHandleLogs_FlushesHeadersImmediately verifies the SSE stream establishes
+// (status + an initial frame) before any log event, so a client on a quiet
+// server (e.g. the no-traffic demo) isn't left hanging with no response.
+func TestHandleLogs_FlushesHeadersImmediately(t *testing.T) {
+	a := setupAPI(t)
+	a.stats = stats.NewCollector()
+	t.Cleanup(a.stats.Stop)
+
+	// Pre-cancel: handleLogs writes+flushes the initial frame before entering
+	// its select loop, then returns as soon as it sees the cancelled context.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/logs", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	a.handleLogs(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("expected Content-Type text/event-stream, got %q", ct)
+	}
+	if !strings.Contains(rec.Body.String(), ": connected") {
+		t.Fatalf("expected an initial ': connected' SSE frame before any event, got %q", rec.Body.String())
 	}
 }
