@@ -33,6 +33,9 @@ type Options struct {
 	LoginWindow    time.Duration
 	LoginGlobalMax int
 	TrustedProxies []*net.IPNet
+	// DemoMode makes device enrollment codes persistent and reusable so the
+	// pairing QR can be handed to App Store review. See enrollStore.
+	DemoMode bool
 }
 
 // NewServer builds the admin HTTP handler. mountDiagnostics mounts /metrics on
@@ -53,7 +56,7 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 		globalFails:     newGlobalCounter(opts.LoginGlobalMax, opts.LoginWindow),
 		loginRetryAfter: strconv.Itoa(int(opts.LoginWindow.Seconds())),
 		secureCookies:   forceHTTPS,
-		enroll:          newEnrollStore(5 * time.Minute),
+		enroll:          newEnrollStore(5*time.Minute, opts.DemoMode),
 	}
 
 	mux := http.NewServeMux()

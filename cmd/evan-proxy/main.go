@@ -89,6 +89,7 @@ func main() {
 			LoginWindow:    cfg.AdminLoginWindow,
 			LoginGlobalMax: cfg.AdminLoginGlobalMax,
 			TrustedProxies: trustedProxies,
+			DemoMode:       cfg.DemoMode,
 		},
 		cfg.MetricsListen == "",
 		cfg.ForceHTTPS)
