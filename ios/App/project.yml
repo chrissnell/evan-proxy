@@ -27,6 +27,7 @@ targets:
     info:
       path: Generated/Info.plist
       properties:
+        CFBundleDisplayName: Evan Proxy
         UILaunchScreen: {}
         # Home-LAN admin app: the server is typically plain http on the local network.
         NSAppTransportSecurity:
@@ -41,6 +42,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.evanproxy.app
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     preBuildScripts:
       # Generated/Info.plist is gitignored, so pulling a project.yml change
       # without re-running xcodegen silently ships a stale plist (this once
