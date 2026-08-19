@@ -34,9 +34,12 @@ struct SettingsView: View {
                             .font(Typography.mono(14, weight: .bold))
                             .foregroundStyle(Palette.fg)
 
-                        Text("app \(vPrefixed(appVersion)) · server \(serverVersion.map(vPrefixed) ?? "—")")
-                            .font(Typography.mono(12))
-                            .foregroundStyle(Palette.fgMuted)
+                        VStack(spacing: 2) {
+                            Text("App Version: \(vPrefixed(appVersion))")
+                            Text("Server Version: \(serverVersion.map(vPrefixed) ?? "—")")
+                        }
+                        .font(Typography.mono(12))
+                        .foregroundStyle(Palette.fgMuted)
 
                         Text("© 2026 Chris Snell")
                             .font(Typography.mono(12))
