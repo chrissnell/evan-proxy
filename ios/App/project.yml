@@ -31,6 +31,11 @@ targets:
         # separately in App Store Connect).
         CFBundleDisplayName: "Evan Proxy"
         CFBundleName: "Evan Proxy"
+        # Without these, xcodegen writes literal "1.0"/"1" defaults into the
+        # generated Info.plist and Xcode ignores MARKETING_VERSION /
+        # CURRENT_PROJECT_VERSION entirely — every bump silently ships as 1.0(1).
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
         # App Store validation requires all four orientations for an
         # iPad-multitasking-capable app; SwiftUI adapts to each.
@@ -69,8 +74,8 @@ targets:
         # Public version (CFBundleShortVersionString) and build number
         # (CFBundleVersion). The build number must strictly increase on every
         # App Store upload; bump CURRENT_PROJECT_VERSION for each new build.
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "1.0.1"
+        CURRENT_PROJECT_VERSION: 2
     preBuildScripts:
       # Generated/Info.plist is gitignored, so pulling a project.yml change
       # without re-running xcodegen silently ships a stale plist (this once
