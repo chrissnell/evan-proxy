@@ -13,6 +13,17 @@ struct Box<Content: View>: View {
     }
 }
 
+/// Large page title matching the dashboard "evan-proxy" heading.
+struct PageTitle: View {
+    let title: String
+    var body: some View {
+        Text(title)
+            .font(Typography.mono(22, weight: .bold))
+            .foregroundStyle(Palette.fg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// Uppercase, letter-spaced section header matching the web `h2`.
 struct SectionHeader: View {
     let title: String

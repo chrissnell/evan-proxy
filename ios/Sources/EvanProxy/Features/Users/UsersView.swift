@@ -13,7 +13,7 @@ struct UsersView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 10) {
-                    SectionHeader(title: "proxy users")
+                    PageTitle(title: "PROXY USERS")
                     if let e = model.error {
                         Text(e).font(Typography.mono(12)).foregroundStyle(Palette.danger)
                     }

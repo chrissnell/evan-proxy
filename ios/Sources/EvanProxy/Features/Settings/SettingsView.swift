@@ -7,6 +7,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                PageTitle(title: "SETTINGS")
                 SectionHeader(title: "server")
                 Box {
                     VStack(alignment: .leading, spacing: 6) {
@@ -58,7 +59,7 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity)
                 }
             }.padding(12)
-        }.background(Palette.bg).navigationTitle("Settings")
+        }.background(Palette.bg)
         .task {
             guard let client else { return }
             serverVersion = try? await client.getVersion().ok.body.json.version

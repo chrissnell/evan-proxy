@@ -6,9 +6,7 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("evan-proxy")
-                    .font(Typography.mono(22, weight: .bold))
-                    .foregroundStyle(Palette.fg)
+                PageTitle(title: "evan-proxy")
                 SectionHeader(title: "bandwidth · 1h")
                 Box { TrafficChart(buckets: model.buckets, value: { Int($0.bw) }, format: ByteFormat.string) }
                 SectionHeader(title: "requests · 1h")

@@ -10,7 +10,7 @@ struct LogsView: View {
         ScrollView {
             ScrollViewReader { proxy in
                 VStack(alignment: .leading, spacing: 2) {
-                    SectionHeader(title: "log tail · live")
+                    PageTitle(title: "LIVE TRAFFIC LOGS")
                     ForEach(Array(model.lines.enumerated()), id: \.offset) { _, e in
                         row(e)
                     }
