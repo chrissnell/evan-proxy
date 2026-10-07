@@ -666,6 +666,9 @@ button:hover {
 .btn-override { color: var(--purple); border-color: var(--purple); }
 .btn-override:hover { background: var(--purple); color: var(--bg); }
 
+.btn-downtime { color: var(--warn); border-color: var(--warn); }
+.btn-downtime:hover { background: var(--warn); color: var(--bg); }
+
 .override-options {
   display: flex;
   gap: 0.5rem;

@@ -189,10 +189,14 @@ function renderUsers(users) {
       ? '<button class="btn-sm btn-danger-confirm" onclick="confirmDelete(\'' + esc + '\')">confirm?</button>'
       : '<button class="btn-sm btn-danger" onclick="startDelete(\'' + esc + '\')">delete</button>';
     var hasOverride = u.downtime_override_until && new Date(u.downtime_override_until) > new Date();
-    var inDowntime = u.enabled && checkDowntimeClient(u.downtime_schedule);
+    var hasDowntimeNow = u.downtime_until && new Date(u.downtime_until) > new Date();
+    var inDowntime = u.enabled && !hasDowntimeNow && checkDowntimeClient(u.downtime_schedule);
     var statusIndicator;
     if (!u.enabled) {
       statusIndicator = '<span class="dot dot-disabled"></span><span class="status-label status-disabled">disabled</span>';
+    } else if (hasDowntimeNow) {
+      var dRemaining = fmtRemaining(new Date(u.downtime_until));
+      statusIndicator = '<span class="dot dot-downtime"></span><span class="status-label status-downtime">downtime ' + dRemaining + '</span>';
     } else if (hasOverride) {
       var remaining = fmtRemaining(new Date(u.downtime_override_until));
       statusIndicator = '<span class="dot dot-override"></span><span class="status-label status-override">override ' + remaining + '</span>';
@@ -210,6 +214,12 @@ function renderUsers(users) {
     } else if (inDowntime) {
       overrideBtn = '<button class="btn-sm btn-override" onclick="toggleEdit(\'' + esc + '\',\'override\')">override</button>';
     }
+    var downtimeBtn = '';
+    if (hasDowntimeNow) {
+      downtimeBtn = '<button class="btn-sm btn-downtime" onclick="cancelDowntimeNow(\'' + esc + '\')">end downtime</button>';
+    } else if (u.enabled && !inDowntime) {
+      downtimeBtn = '<button class="btn-sm btn-downtime" onclick="toggleEdit(\'' + esc + '\',\'downtime-now\')">downtime</button>';
+    }
     rows.push('<tr>' +
       '<td>' + escHtml(u.username) + '</td>' +
       '<td class="dim">' + escHtml(created) + '</td>' +
@@ -218,6 +228,7 @@ function renderUsers(users) {
       '<td class="user-status">' + statusIndicator + '</td>' +
       '<td class="user-actions">' +
         toggleBtn +
+        downtimeBtn +
         overrideBtn +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'schedule\')">schedule</button>' +
         '<button class="btn-sm" onclick="toggleEdit(\'' + esc + '\',\'port\')">port</button>' +
@@ -228,6 +239,7 @@ function renderUsers(users) {
     if (editingUser === u.username) {
       if (editingField === 'schedule') rows.push(renderScheduleEditRow(u));
       else if (editingField === 'override') rows.push(renderOverrideEditRow(u));
+      else if (editingField === 'downtime-now') rows.push(renderDowntimeNowEditRow(u));
       else if (editingField === 'port') rows.push(renderPortEditRow(u));
       else if (editingField === 'dns') rows.push(renderDNSEditRow(u));
       else if (editingField === 'password') rows.push(renderPasswordEditRow(u));
@@ -545,6 +557,60 @@ async function cancelOverride(username) {
   });
   if (resp.status === 401) { window.location.href = '/login'; return; }
   if (!resp.ok) { showUsersError('failed to cancel override'); return; }
+  refreshUsers();
+}
+
+// --- Ad-hoc Downtime ("downtime for N") ---
+function renderDowntimeNowEditRow(u) {
+  var esc = escAttr(u.username);
+  var durations = [
+    {min: 15, label: '15 min'},
+    {min: 30, label: '30 min'},
+    {min: 60, label: '1 hour'},
+    {min: 720, label: '12 hours'},
+    {min: 1440, label: '1 day'},
+    {min: 10080, label: '1 week'}
+  ];
+  var btns = durations.map(function(d) {
+    return '<button class="btn-sm btn-downtime" onclick="setDowntimeNow(\'' + esc + '\',' + d.min + ')">' + d.label + '</button>';
+  }).join('');
+  return '<tr class="inline-edit-row">' +
+    '<td colspan="6" class="inline-edit-cell">' +
+      '<div class="inline-edit-form">' +
+        '<span class="override-options">' +
+          '<span class="label">downtime for:</span>' +
+          btns +
+        '</span>' +
+        '<span class="edit-actions">' +
+          '<button class="btn-sm" onclick="closeEdit()">cancel</button>' +
+        '</span>' +
+      '</div>' +
+    '</td></tr>';
+}
+
+async function setDowntimeNow(username, minutes) {
+  showUsersError('');
+  var resp = await fetch('/api/users/downtime-now', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, duration_minutes: minutes})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showUsersError('failed to set downtime'); return; }
+  editingUser = null;
+  editingField = null;
+  refreshUsers();
+}
+
+async function cancelDowntimeNow(username) {
+  showUsersError('');
+  var resp = await fetch('/api/users/downtime-now', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: username, duration_minutes: 0})
+  });
+  if (resp.status === 401) { window.location.href = '/login'; return; }
+  if (!resp.ok) { showUsersError('failed to end downtime'); return; }
   refreshUsers();
 }
 

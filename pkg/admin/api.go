@@ -597,6 +597,73 @@ func (a *api) handleDowntimeOverride(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+type downtimeNowRequest struct {
+	Username        string `json:"username"`
+	DurationMinutes int    `json:"duration_minutes"`
+}
+
+// handleDowntimeNow puts a user into (or lifts) ad-hoc downtime. Mirrors
+// handleDowntimeOverride structurally but inverts the sense: a positive
+// duration BLOCKS the user, zero or negative clears the block.
+func (a *api) handleDowntimeNow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req downtimeNowRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.Username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	if req.DurationMinutes <= 0 {
+		if err := a.users.ClearDowntimeUntil(req.Username); err != nil {
+			if errors.Is(err, userdb.ErrUnknownUser) {
+				http.Error(w, "user not found", http.StatusNotFound)
+				return
+			}
+			a.logger.Errorf("admin", "clear downtime_until: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		// Immediately restart the user's listener so they don't have to wait
+		// for the next reconciler tick — matching the override-clear path.
+		users, _ := a.users.List()
+		for _, u := range users {
+			if u.Username == req.Username && u.Port > 0 && u.Enabled {
+				a.ports.StartListener(req.Username, u.Port)
+				break
+			}
+		}
+	} else {
+		until := time.Now().Add(time.Duration(req.DurationMinutes) * time.Minute)
+		if err := a.users.SetDowntimeUntil(req.Username, until); err != nil {
+			if errors.Is(err, userdb.ErrUnknownUser) {
+				http.Error(w, "user not found", http.StatusNotFound)
+				return
+			}
+			a.logger.Errorf("admin", "set downtime_until: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		// Immediately stop the user's listener so the block takes effect at
+		// once rather than at the next 30-second reconciler tick.
+		users, _ := a.users.List()
+		for _, u := range users {
+			if u.Username == req.Username && u.Port > 0 {
+				a.ports.StopListener(u.Port)
+				break
+			}
+		}
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (a *api) handleLogs(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

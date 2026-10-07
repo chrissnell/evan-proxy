@@ -81,6 +81,7 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 	mux.HandleFunc("/api/users/enabled", a.requireSession(a.handleSetEnabled))
 	mux.HandleFunc("/api/users/downtime", a.requireSession(a.handleUpdateDowntime))
 	mux.HandleFunc("/api/users/downtime-override", a.requireSession(a.handleDowntimeOverride))
+	mux.HandleFunc("/api/users/downtime-now", a.requireSession(a.handleDowntimeNow))
 
 	// Device pairing: enroll/list/revoke require the browser session (a device
 	// bearer token must not be able to mint or revoke tokens); /api/pair is

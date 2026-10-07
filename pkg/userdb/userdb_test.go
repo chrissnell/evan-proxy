@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"evan-proxy/pkg/logging"
 )
@@ -593,6 +594,91 @@ func TestIsEnabledUnknownUser(t *testing.T) {
 
 	if db.IsEnabled("nobody") {
 		t.Error("expected false for unknown user")
+	}
+}
+
+func TestDowntimeUntil_SetClearPersist(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+
+	db, err := Open(path, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Add("alice", "pw", 18081, 18090); err != nil {
+		t.Fatal(err)
+	}
+
+	if db.IsInDowntime("alice") {
+		t.Fatal("fresh user must not be in downtime")
+	}
+
+	until := time.Now().Add(2 * time.Hour)
+	if err := db.SetDowntimeUntil("alice", until); err != nil {
+		t.Fatal(err)
+	}
+	if !db.IsInDowntime("alice") {
+		t.Fatal("expected IsInDowntime true after SetDowntimeUntil")
+	}
+
+	users, err := db.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if users[0].DowntimeUntil == "" {
+		t.Fatal("List() should surface active downtime_until")
+	}
+
+	// Reopen DB to prove persistence + cache rehydration.
+	db.Close()
+	db2, err := Open(path, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db2.Close() })
+	if !db2.IsInDowntime("alice") {
+		t.Error("expected downtime to persist across reopen")
+	}
+
+	if err := db2.ClearDowntimeUntil("alice"); err != nil {
+		t.Fatal(err)
+	}
+	if db2.IsInDowntime("alice") {
+		t.Error("expected IsInDowntime false after ClearDowntimeUntil")
+	}
+}
+
+func TestDowntimeUntil_WinsOverOverride(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.Add("alice", "pw", 18081, 18090); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set an active schedule override (would normally suppress downtime).
+	if err := db.SetDowntimeOverride("alice", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// Also set an ad-hoc downtime. Ad-hoc must win.
+	if err := db.SetDowntimeUntil("alice", time.Now().Add(30*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	if !db.IsInDowntime("alice") {
+		t.Fatal("ad-hoc downtime must win over an active override")
+	}
+}
+
+func TestDowntimeUntil_ExpiredIsIgnored(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.Add("alice", "pw", 18081, 18090); err != nil {
+		t.Fatal(err)
+	}
+	// Row has an expired timestamp. IsInDowntime must return false.
+	if err := db.SetDowntimeUntil("alice", time.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if db.IsInDowntime("alice") {
+		t.Error("expired downtime_until must not count as in-downtime")
 	}
 }
 
