@@ -62,9 +62,13 @@ func NewServer(adminAuth *auth.AdminAuth, collector *stats.Collector, users *use
 
 	mux := http.NewServeMux()
 
-	// Static files (CSS, fonts)
+	// Static files (CSS, fonts). The admin UI lives on the public Cloudflare
+	// tunnel which caches aggressively by default (CSS/JS get a 4h edge TTL),
+	// so a deploy with CSS/HTML changes would otherwise serve stale assets
+	// for hours. Advertise no-cache; Cloudflare and browsers will revalidate
+	// via If-None-Match on every request. The payloads are small (~16KB).
 	staticSub, _ := fs.Sub(staticFS, "static")
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	mux.Handle("/static/", http.StripPrefix("/static/", noCache(http.FileServer(http.FS(staticSub)))))
 
 	// API routes
 	mux.HandleFunc("/api/login", a.handleLogin)
@@ -134,8 +138,18 @@ func serveFile(name string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(data)
 	}
+}
+
+// noCache disables intermediary caching for the wrapped handler. See the
+// comment at the /static/ mount for the Cloudflare rationale.
+func noCache(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		h.ServeHTTP(w, r)
+	})
 }
 
 // requireSessionPage redirects to /login if no valid session.
