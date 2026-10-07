@@ -671,11 +671,17 @@ button:hover {
 
 /* Ad-hoc downtime duration picker — visual language mirrors the schedule
    time picker (.time-picker-hours / .tp-btn) so both pickers feel like
-   siblings. */
+   siblings. The modifier class on .inline-edit-form stacks the label on
+   top, lets the grid fill available width, and bottom-aligns cancel so it
+   sits in line with the button grid rather than the label. */
+.inline-edit-form.downtime-form { align-items: flex-end; }
+
 .downtime-picker {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
 }
 .downtime-picker-label {
   font-size: 0.85rem;
@@ -683,10 +689,15 @@ button:hover {
 }
 .downtime-picker-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 3px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
 }
-.downtime-picker .tp-btn:hover { border-color: var(--warn); }
+.downtime-picker .tp-btn {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  min-width: 0;
+}
+.downtime-picker .tp-btn:hover { border-color: var(--warn); color: var(--warn); }
 
 .override-options {
   display: flex;
