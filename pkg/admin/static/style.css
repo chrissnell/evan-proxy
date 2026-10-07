@@ -669,6 +669,25 @@ button:hover {
 .btn-downtime { color: var(--warn); border-color: var(--warn); }
 .btn-downtime:hover { background: var(--warn); color: var(--bg); }
 
+/* Ad-hoc downtime duration picker — visual language mirrors the schedule
+   time picker (.time-picker-hours / .tp-btn) so both pickers feel like
+   siblings. */
+.downtime-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.downtime-picker-label {
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+}
+.downtime-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+}
+.downtime-picker .tp-btn:hover { border-color: var(--warn); }
+
 .override-options {
   display: flex;
   gap: 0.5rem;
