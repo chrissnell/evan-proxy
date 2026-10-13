@@ -6,6 +6,8 @@ struct UserCard: View {
     let onSchedule: () -> Void
     let onEdit: () -> Void
     let onOverride: () -> Void
+    let onDowntime: () -> Void
+    let onEndDowntime: () -> Void
 
     var body: some View {
         Box {
@@ -18,9 +20,10 @@ struct UserCard: View {
                 }
                 chip
                 Text(meta).font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
+                // One state-dependent action at most, so the row never crowds
+                // past three buttons at any width.
                 HStack(spacing: 6) {
-                    if case .downtime = state { PillButton(title: "Override", color: Palette.purple, action: onOverride) }
-                    if case .override = state { PillButton(title: "Cancel Override", color: Palette.purple, action: onOverride) }
+                    stateAction
                     PillButton(title: "Schedule", action: onSchedule)
                     PillButton(title: "Edit", action: onEdit)
                 }
@@ -29,14 +32,31 @@ struct UserCard: View {
     }
 
     private var state: DisplayState { UserStatus.state(for: user) }
+
+    @ViewBuilder private var stateAction: some View {
+        switch state {
+        case .downtimeNow:
+            PillButton(title: "End Downtime", color: Palette.warn, action: onEndDowntime)
+        case .override:
+            PillButton(title: "Cancel Override", color: Palette.purple, action: onOverride)
+        case .downtime:
+            PillButton(title: "Override", color: Palette.purple, action: onOverride)
+        case .enabled:
+            PillButton(title: "Downtime", color: Palette.warn, action: onDowntime)
+        case .disabled:
+            EmptyView()
+        }
+    }
+
     private var chip: some View {
         switch state {
         case .enabled:  return StatusChip(text: "Enabled", color: Palette.accent)
         case .disabled: return StatusChip(text: "Disabled", color: Palette.danger)
         case .downtime: return StatusChip(text: "Downtime", color: Palette.warn)
+        case .downtimeNow(let until):
+            return StatusChip(text: "Downtime · \(RemainingTime.short(until: until)) left", color: Palette.warn)
         case .override(let until):
-            let m = max(0, Int(until.timeIntervalSinceNow / 60))
-            return StatusChip(text: "Override · \(m)m left", color: Palette.purple)
+            return StatusChip(text: "Override · \(RemainingTime.short(until: until)) left", color: Palette.purple)
         }
     }
     private var meta: String {

@@ -7,6 +7,7 @@ protocol UsersAPI {
     func listUsers() async throws -> [Components.Schemas.UserInfo]
     func setEnabled(_ username: String, _ enabled: Bool) async throws
     func setOverride(_ username: String, minutes: Int) async throws
+    func setDowntimeNow(_ username: String, minutes: Int) async throws
     func createUser(_ username: String, _ password: String) async throws
 }
 
@@ -20,6 +21,9 @@ struct LiveUsersAPI: UsersAPI {
     }
     func setEnabled(_ username: String, _ enabled: Bool) async throws {
         _ = try await client.setEnabled(body: .json(.init(username: username, enabled: enabled))).ok
+    }
+    func setDowntimeNow(_ username: String, minutes: Int) async throws {
+        _ = try await client.setDowntimeNow(body: .json(.init(username: username, duration_minutes: minutes))).ok
     }
     func createUser(_ username: String, _ password: String) async throws {
         _ = try await client.createUser(body: .json(.init(username: username, password: password))).created
@@ -83,6 +87,11 @@ final class UsersModel {
     func setOverride(_ username: String, minutes: Int) async {
         do { try await api.setOverride(username, minutes: minutes); await load() }
         catch { self.error = "Failed to set override" }
+    }
+    /// `minutes <= 0` ends the block; anything positive starts one.
+    func setDowntimeNow(_ username: String, minutes: Int) async {
+        do { try await api.setDowntimeNow(username, minutes: minutes); await load() }
+        catch { self.error = minutes > 0 ? "Failed to start downtime" : "Failed to end downtime" }
     }
     /// Returns true on success so the add-user sheet knows to dismiss.
     func createUser(_ username: String, _ password: String) async -> Bool {

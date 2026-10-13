@@ -36,7 +36,7 @@ To make this work, follow this plan:
 - Rate-limiting on authentication failures to prevent password brute-forcing
 - DNS-over-TLS (DoT) and DNS-over-HTTPS (DoH) support
 - DNS-level block detection (returns 523 for DNS-blocked domains)
-- Downtime schedules — set per-user internet access windows by day of week, with support for multiple windows per day and overnight spans; temporary overrides let you suspend downtime for 15 minutes to 12 hours without changing the schedule
+- Downtime schedules — set per-user internet access windows by day of week, with support for multiple windows per day and overnight spans; temporary overrides let you suspend downtime for 15 minutes to 12 hours without changing the schedule, and ad-hoc downtime cuts a user off immediately for 15 minutes to a week
 - Prometheus metrics on a dedicated internal listener (kept off the public admin port)
 
 ## Configuration
@@ -126,6 +126,8 @@ Each user can have a downtime schedule that blocks proxy access during specified
 You can add multiple downtime windows per day — for example, block access during school hours (8 AM–3 PM) and again at bedtime (9 PM–7 AM). Overnight windows that cross midnight are handled automatically — a window from 21:00 to 07:00 on Monday means access is blocked from Monday 9 PM through Tuesday 7 AM.
 
 **Temporary overrides.** When a user is currently in downtime, the admin UI shows an "override" button that lets you temporarily re-enable proxy access for a chosen duration (15 minutes to 12 hours). The override suppresses all scheduled downtime until it expires — even if a new downtime window starts during the override period. Active overrides display a countdown in the UI and can be cancelled at any time.
+
+**Ad-hoc downtime.** Each enabled user also has a "downtime" button that blocks them immediately for a chosen duration — 15m, 30m, 1h, 3h, 6h, 12h, 1 day or 1 week — without touching their schedule. Their dedicated proxy listener stops right away and comes back on its own when the timer expires, or as soon as you press "end downtime". Ad-hoc downtime outranks everything except a permanent disable: an active override does not suspend it. Both the admin UI and the iOS app offer it, with a countdown on the user's status.
 
 **Timezone configuration is required.** The server evaluates downtime schedules against its local clock, so it must be set to your timezone. In Kubernetes, set the `TZ` environment variable (the Docker image includes `tzdata`). The Helm chart exposes this as the `timezone` value:
 

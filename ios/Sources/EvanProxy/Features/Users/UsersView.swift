@@ -7,6 +7,7 @@ struct UsersView: View {
     @State private var detailUser: Components.Schemas.UserInfo?
     @State private var scheduleUser: Components.Schemas.UserInfo?
     @State private var overrideUser: Components.Schemas.UserInfo?
+    @State private var downtimeUsername: String?
     @State private var showingAdd = false
 
     var body: some View {
@@ -22,7 +23,9 @@ struct UsersView: View {
                             onToggle: { on in Task { await model.setEnabled(u.username, on) } },
                             onSchedule: { scheduleUser = u },
                             onEdit: { detailUser = u },
-                            onOverride: { overrideUser = u })
+                            onOverride: { overrideUser = u },
+                            onDowntime: { downtimeUsername = u.username },
+                            onEndDowntime: { Task { await model.setDowntimeNow(u.username, minutes: 0) } })
                     }
                     PillButton(title: "+ Add User", color: Palette.accent) { showingAdd = true }
                 }.padding(12)
@@ -42,6 +45,13 @@ struct UsersView: View {
                     Button("2 hours") { Task { await model.setOverride(u.username, minutes: 120) } }
                 }
             }
+            .sheet(isPresented: downtimePresented) {
+                if let username = downtimeUsername {
+                    DowntimeSheet(username: username) { minutes in
+                        Task { await model.setDowntimeNow(username, minutes: minutes) }
+                    }
+                }
+            }
             .sheet(isPresented: $showingAdd) {
                 AddUserSheet { u, p in await model.createUser(u, p) }
             }
@@ -52,6 +62,58 @@ struct UsersView: View {
 
     private var overridePresented: Binding<Bool> {
         Binding(get: { overrideUser != nil }, set: { if !$0 { overrideUser = nil } })
+    }
+    private var downtimePresented: Binding<Bool> {
+        Binding(get: { downtimeUsername != nil }, set: { if !$0 { downtimeUsername = nil } })
+    }
+}
+
+/// One duration choice in the ad-hoc downtime picker.
+private struct DowntimeChoice: Identifiable {
+    let minutes: Int
+    let label: String
+    var id: Int { minutes }
+}
+
+/// Ad-hoc downtime duration picker. The 4x2 grid of choices mirrors the admin
+/// UI's picker so both front-ends offer the same durations in the same order.
+struct DowntimeSheet: View {
+    let username: String
+    let onPick: (Int) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private let choices = [
+        DowntimeChoice(minutes: 15, label: "15m"),
+        DowntimeChoice(minutes: 30, label: "30m"),
+        DowntimeChoice(minutes: 60, label: "1h"),
+        DowntimeChoice(minutes: 180, label: "3h"),
+        DowntimeChoice(minutes: 360, label: "6h"),
+        DowntimeChoice(minutes: 720, label: "12h"),
+        DowntimeChoice(minutes: 1440, label: "1d"),
+        DowntimeChoice(minutes: 10080, label: "1w")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "downtime for")
+            Box {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
+                          spacing: 6) {
+                    ForEach(choices) { choice in
+                        PillButton(title: choice.label, color: Palette.warn) {
+                            onPick(choice.minutes)
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            Text("Blocks \(username) right away. Access comes back on its own when the timer runs out.")
+                .font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
+            PillButton(title: "Cancel") { dismiss() }
+        }
+        .padding(16).frame(maxHeight: .infinity, alignment: .top)
+        .background(Palette.bg)
+        .presentationDetents([.height(300)])
     }
 }
 

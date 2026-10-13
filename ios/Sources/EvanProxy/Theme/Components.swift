@@ -60,7 +60,11 @@ struct PillButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
+            // Rows of three share the width evenly, so a long label like
+            // "Cancel Override" has to shrink rather than wrap to two lines
+            // and stretch the row.
             Text(title).font(Typography.mono(13))
+                .lineLimit(1).minimumScaleFactor(0.7)
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .foregroundStyle(filled ? Palette.bg : color)
                 .frame(maxWidth: .infinity)
