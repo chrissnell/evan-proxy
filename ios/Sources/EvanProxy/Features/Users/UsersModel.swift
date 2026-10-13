@@ -74,7 +74,25 @@ final class UsersModel {
     private let api: UsersAPI
     var users: [Components.Schemas.UserInfo] = []
     var error: String?
+    private var pollTask: Task<Void, Never>?
     init(api: UsersAPI) { self.api = api }
+
+    /// Poll like the web UI, every 30s. Without it the downtime and override
+    /// countdowns on the cards would sit frozen and a card would keep offering
+    /// "End Downtime" after the block had already expired on the server.
+    func start() {
+        stop()  // idempotent: don't stack pollers if the view re-appears
+        pollTask = Task {
+            while !Task.isCancelled {
+                await load()
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+    }
+    func stop() {
+        pollTask?.cancel()
+        pollTask = nil
+    }
 
     func load() async {
         do { users = try await api.listUsers(); error = nil }

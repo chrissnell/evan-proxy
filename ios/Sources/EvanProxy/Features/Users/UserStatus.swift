@@ -9,6 +9,18 @@ enum DisplayState {
 }
 
 enum UserStatus {
+    /// The independent facts behind a user's status. The chip collapses these
+    /// into one DisplayState; the action buttons need them separately, because
+    /// ad-hoc downtime and an override can be pending at the same time.
+    struct Flags {
+        let enabled: Bool
+        let adHocUntil: Date?
+        let overrideUntil: Date?
+        /// Scheduled downtime, already suppressed while ad-hoc downtime runs —
+        /// an override cannot lift an ad-hoc block, so the app must not offer one.
+        let inScheduledDowntime: Bool
+    }
+
     /// Mirrors the web UI's checkDowntimeClient: keys are "0"(Sun)…"6"(Sat).
     static func inDowntime(schedule: [String: [Components.Schemas.DowntimeWindow]],
                            weekday: Int, minutesOfDay now: Int) -> Bool {
@@ -28,21 +40,34 @@ enum UserStatus {
         return false
     }
 
-    static func state(for u: Components.Schemas.UserInfo, now: Date = Date(),
-                      calendar: Calendar = .current) -> DisplayState {
-        if !u.enabled { return .disabled }
-        if let until = expiry(u.downtime_until, after: now) { return .downtimeNow(until: until) }
-        if let until = expiry(u.downtime_override_until, after: now) { return .override(until: until) }
+    static func flags(for u: Components.Schemas.UserInfo, now: Date = Date(),
+                      calendar: Calendar = .current) -> Flags {
+        let adHoc = expiry(u.downtime_until, after: now)
         let comps = calendar.dateComponents([.weekday, .hour, .minute], from: now)
         let weekday = (comps.weekday ?? 1) - 1            // Calendar: 1=Sun → 0=Sun
         let minutes = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
-        if inDowntime(schedule: u.downtime_schedule?.additionalProperties ?? [:],
-                      weekday: weekday, minutesOfDay: minutes) { return .downtime }
-        return .enabled
+        let scheduled = adHoc == nil && inDowntime(
+            schedule: u.downtime_schedule?.additionalProperties ?? [:],
+            weekday: weekday, minutesOfDay: minutes)
+        return Flags(enabled: u.enabled, adHocUntil: adHoc,
+                     overrideUntil: expiry(u.downtime_override_until, after: now),
+                     inScheduledDowntime: scheduled)
+    }
+
+    static func state(for u: Components.Schemas.UserInfo, now: Date = Date(),
+                      calendar: Calendar = .current) -> DisplayState {
+        let f = flags(for: u, now: now, calendar: calendar)
+        if !f.enabled { return .disabled }
+        if let until = f.adHocUntil { return .downtimeNow(until: until) }
+        if let until = f.overrideUntil { return .override(until: until) }
+        return f.inScheduledDowntime ? .downtime : .enabled
     }
 
     /// Parses an RFC3339 deadline, treating a missing or already-passed one as nil
     /// — the server clears expired stamps lazily, so the app must ignore them.
+    /// The formatter is built per call: ISO8601DateFormatter is a non-Sendable
+    /// class, so a shared static would need a concurrency opt-out to compile
+    /// under the package's Swift 6 language mode.
     private static func expiry(_ raw: String?, after now: Date) -> Date? {
         guard let raw, let date = ISO8601DateFormatter().date(from: raw), date > now else { return nil }
         return date
