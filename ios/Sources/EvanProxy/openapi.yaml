@@ -345,6 +345,37 @@ paths:
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /api/users/downtime-now:
+    put:
+      tags: [downtime]
+      summary: Start or end ad-hoc downtime
+      description: |
+        Blocks a user immediately for a fixed duration, independent of their
+        weekly schedule, and stops their dedicated port listener.
+        `duration_minutes` of `0` (or less) ends the block and restarts the
+        listener. Ad-hoc downtime outranks a downtime override, and clears
+        itself when it expires.
+      operationId: setDowntimeNow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, duration_minutes]
+              properties:
+                username: { type: string }
+                duration_minutes:
+                  type: integer
+                  description: Minutes to block the user; 0 or less ends the block.
+      responses:
+        '200': { description: Ad-hoc downtime started or ended. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/stats/top-sites:
     get:
       tags: [stats]
@@ -705,6 +736,11 @@ components:
         downtime_override_until:
           type: string
           description: RFC3339 time until which downtime is suspended; absent if no override.
+        downtime_until:
+          type: string
+          description: |
+            RFC3339 time until which ad-hoc downtime blocks the user; absent if
+            there is none. Outranks both the schedule and an override.
 
     HostCount:
       type: object
