@@ -97,27 +97,29 @@ struct TimeWheelSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 12) {
+        // Stack Start/End vertically so each wheel gets the full sheet width.
+        // Side-by-side wheels overflow on narrow iPhones (both columns get
+        // pushed to opposite edges, hour digits clip at the gutters).
+        VStack(spacing: 10) {
             SectionHeader(title: "downtime window")
-            HStack {
-                picker("Start", $window.start)
-                picker("End", $window.end)
-            }
+            picker("Start", $window.start)
+            picker("End",   $window.end)
             HStack(spacing: 6) {
                 PillButton(title: "Remove", color: Palette.danger) { onRemove() }
-                PillButton(title: "Done", color: Palette.accent, filled: true) { dismiss() }
+                PillButton(title: "Done",   color: Palette.accent, filled: true) { dismiss() }
             }
         }
         .padding(16)
-        .presentationDetents([.height(340)])
+        .presentationDetents([.height(540)])
         .background(Palette.bg)
     }
 
     private func picker(_ label: String, _ hhmm: Binding<String>) -> some View {
-        VStack {
+        VStack(alignment: .leading, spacing: 2) {
             Text(label).font(Typography.mono(12)).foregroundStyle(Palette.fgMuted)
             DatePicker("", selection: dateBinding(hhmm), displayedComponents: .hourAndMinute)
                 .datePickerStyle(.wheel).labelsHidden()
+                .frame(maxWidth: .infinity)
         }
     }
 
