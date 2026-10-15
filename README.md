@@ -88,7 +88,7 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `PAC_PATH` | `/proxy.pac` | Request path the PAC is served at |
 | `PAC_PROXY_ENDPOINT` | | Proxy `host:port` the PAC hands back; empty = echo the request's own `Host` (works for NAT/port-forward with no per-user config) |
 | `PAC_BYPASS_DOMAINS` | `venmo.com,paypal.com,paypalobjects.com,braintreegateway.com,braintree-api.com` | Comma-separated domain suffixes routed `DIRECT` (bypassing the proxy). The OS captive-portal probes (`captive.apple.com`, `connectivitycheck.gstatic.com`, …) and local-only suffixes (`.local`, `.lan`) are always included on top of this list. |
-| `PAC_CACHE_MAX_AGE` | `1h` | `max-age` sent with the PAC response. A captive portal blocks the PAC URL along with everything else, so the device needs a cached copy to have any routing rules while it logs in. `0` sends `Cache-Control: no-store`. |
+| `PAC_CACHE_MAX_AGE` | `1h` | `max-age` sent with the PAC response (Go duration — include the unit, e.g. `1h`). A captive portal blocks the PAC URL along with everything else, so the device needs a cached copy to have any routing rules while it logs in. `0` sends `Cache-Control: no-store`. |
 | `PAC_DIRECT_FALLBACK` | `false` | Append `; DIRECT` to the PAC's proxy result so a device that cannot reach the proxy connects directly instead of failing. Keeps a captive-portal login working off a cached PAC, but traffic goes **unfiltered** whenever the proxy is unreachable. |
 | `PPROF_ENABLED` | `false` | When `true`, serve Go `pprof` profiling endpoints on a separate loopback listener (`PPROF_LISTEN`). Never served on the admin port. |
 | `PPROF_LISTEN` | `127.0.0.1:6060` | Listen address for the pprof endpoints when `PPROF_ENABLED=true`. Loopback-only by default — reach it with `kubectl port-forward`. |
@@ -127,7 +127,7 @@ A captive portal blocks *all* traffic until you log in — including the PAC URL
 
 > `ProxyPACFallbackAllowed` — *If `true`, allows connecting directly to the destination if the proxy autoconfiguration (PAC) file is unreachable.* **Default: `false`.**
 
-That default is why portal logins fail with an otherwise-correct setup. `ProxyCaptiveLoginAllowed` is not a substitute: it lets the device bypass the proxy *server*, but with no PAC the device has no proxy configuration to work from at all. **Both keys are required:**
+That default is why portal logins fail with an otherwise-correct setup. `ProxyCaptiveLoginAllowed` is not a substitute: it lets the device bypass the proxy *server*, but with no PAC the device has no proxy configuration to work from at all. Apple marks both keys optional and both default to `false`; `ProxyPACFallbackAllowed` is the load-bearing one here, and `ProxyCaptiveLoginAllowed` should be set alongside it:
 
 ```xml
 <key>PayloadType</key>
@@ -145,16 +145,22 @@ That default is why portal logins fail with an otherwise-correct setup. `ProxyCa
 <true/>
 ```
 
-**Trade-off:** `ProxyPACFallbackAllowed=true` means the device browses unfiltered whenever it cannot fetch the PAC. It self-heals — once the portal login completes, the PAC is reachable again and filtering resumes — but a network that blocks the PAC URL outright (an odd port like `17001` is easy to block) leaves the device unproxied. Publishing the PAC on `443` through an HTTPS ingress makes it much harder to block; iOS 13+ accepts an `https://` `ProxyPACURL`.
+**Trade-off:** `ProxyPACFallbackAllowed=true` means the device browses unfiltered whenever it cannot fetch the PAC. It self-heals — once the portal login completes, the PAC is reachable again and filtering resumes — but a network that blocks the PAC URL outright (an odd port like `17001` is easy to block) leaves the device unproxied. Publishing the PAC on `443` through an HTTPS ingress makes it much harder to block; Apple allows an `https://` `ProxyPACURL` (and since iOS 13 / macOS 10.15, *only* `http://` or `https://` URLs).
 
 Beyond the profile keys, the generated PAC handles portals it has never heard of:
 
-- **Bare hostnames** (`http://wifi`, `http://logon`) → `DIRECT`
+- **Bare hostnames** (`wifi`, `logon`) → `DIRECT`
 - **Local-only suffixes** (`.local`, `.lan`, `.home`, `.internal`, `.localdomain`) → `DIRECT`
-- **Hosts resolving into a private, link-local, or CGNAT range** (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `100.64/10`) → `DIRECT` — this is the gateway address portals redirect to, including when they hijack DNS
+- **Private and link-local address literals** (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `127/8`) → `DIRECT` — the gateway address portals redirect to
 - **OS portal-detection probes** (`captive.apple.com`, `connectivitycheck.gstatic.com`, …) → `DIRECT`, always, regardless of `PAC_BYPASS_DOMAINS`
 
-None of those addresses can reach the public internet, so routing them `DIRECT` costs no filtering coverage. Portals served from a *public* domain (`deltawifi.com`, `gogoinflight.com`, hotel chains) still need an entry in `PAC_BYPASS_DOMAINS` — and if you also ship an encrypted-DNS (`com.apple.dnsSettings.managed`) payload, the same domains need `DomainAction: NeverConnect` there, or DNS for the portal will fail before routing even matters.
+Those rules are deliberately narrow. The PAC does **not** resolve a hostname and route it `DIRECT` because the answer looks private: that would hand the filtering decision to whatever resolver the device is talking to, and a hostile network — or a public wildcard DNS service like `nip.io` — could point any name at a LAN address to escape the proxy. Only an address literal is trusted. `100.64/10` (CGNAT) is excluded for the same reason: it is also Tailscale's range, so an exit node there would be a ready-made full-internet bypass.
+
+What this does cost: anything running on the local network is reachable off-proxy — unfiltered and unlogged. That is unavoidable if a portal login is to work at all.
+
+Portals served from a *public* domain (`deltawifi.com`, `gogoinflight.com`, hotel chains) still need an entry in `PAC_BYPASS_DOMAINS` — and if you also ship an encrypted-DNS (`com.apple.dnsSettings.managed`) payload, the same domains need `DomainAction: NeverConnect` there, or DNS for the portal will fail before routing even matters.
+
+Because the PAC is cached for `PAC_CACHE_MAX_AGE` (a Go duration — **include the unit**, e.g. `1h`; a bare `3600` is ignored and falls back to the default), changes to `PAC_BYPASS_DOMAINS`, `PAC_PROXY_ENDPOINT`, or `PAC_DIRECT_FALLBACK` take up to that long to reach a device that already holds a copy.
 
 If a portal still fails after all of the above, set `PAC_DIRECT_FALLBACK=true`. The PAC then returns `PROXY host:port; DIRECT`, so the device falls through to a direct connection when the proxy itself does not answer. Use it as a last resort: iOS remembers a failed proxy for a while, so the device can stay unfiltered after a single blip.
 

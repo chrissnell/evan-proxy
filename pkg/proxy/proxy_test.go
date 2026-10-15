@@ -120,14 +120,20 @@ func TestPACCacheable(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if got, want := w.Header().Get("Cache-Control"), "public, max-age=3600"; got != want {
+	if got, want := w.Header().Get("Cache-Control"), "private, max-age=3600"; got != want {
 		t.Errorf("Cache-Control = %q, want %q", got, want)
+	}
+	// The body is derived from Host, so the cache must be keyed on it.
+	if got := w.Header().Get("Vary"); got != "Host" {
+		t.Errorf("Vary = %q, want Host", got)
 	}
 
 	// Zero disables caching entirely.
 	h.cfg.PACCacheMaxAge = 0
+	req = httptest.NewRequest("GET", "/proxy.pac", nil)
+	req.Host = "proxy.chrissnell.com:17001"
 	w = httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("GET", "/proxy.pac", nil))
+	h.ServeHTTP(w, req)
 	if got := w.Header().Get("Cache-Control"); got != "no-store" {
 		t.Errorf("Cache-Control = %q, want no-store when max-age is 0", got)
 	}

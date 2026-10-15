@@ -65,6 +65,8 @@ pac:
   # max-age sent with the PAC response. A captive portal blocks the PAC URL
   # along with everything else, so the device needs a cached copy to have any
   # routing rules while it logs in. "0" sends Cache-Control: no-store.
+  # Must be a Go duration with a unit ("1h", "30m") — a bare number is ignored.
+  # Note that bypassDomains changes take up to this long to reach a device.
   cacheMaxAge: "1h"
   # Append "; DIRECT" to the PAC's proxy result so a device that cannot reach
   # the proxy connects directly instead of failing. This keeps a captive-portal

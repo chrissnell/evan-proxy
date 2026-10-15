@@ -345,8 +345,13 @@ func (h *Handler) servePAC(w http.ResponseWriter, r *http.Request) {
 	}
 	body := pac.Generate(endpoint, h.cfg.PACBypassDomains, h.cfg.PACDirectFallback)
 	w.Header().Set("Content-Type", pac.ContentType)
+	// private, not public: the device's own cache is the point, and a captive
+	// portal's interception proxy has no business storing a per-device proxy
+	// configuration. The body varies with Host when PAC_PROXY_ENDPOINT is
+	// unset, so key the cache on it.
+	w.Header().Set("Vary", "Host")
 	if secs := int(h.cfg.PACCacheMaxAge.Seconds()); secs > 0 {
-		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", secs))
+		w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", secs))
 	} else {
 		w.Header().Set("Cache-Control", "no-store")
 	}

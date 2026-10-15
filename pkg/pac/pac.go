@@ -9,11 +9,18 @@
 // CAPTIVE PORTALS: a portal network blocks everything until you log in, so the
 // portal page itself must never be routed through the proxy — the proxy is
 // unreachable at that point. Three rules cover portals the bypass list has
-// never heard of: bare hostnames (http://wifi, http://logon), local-only DNS
-// suffixes (.local, .lan), and hosts that resolve into a private, link-local,
-// or CGNAT range (the gateway address a portal redirects to, including via DNS
-// hijack). None of those addresses can reach the public internet, so routing
-// them DIRECT costs no filtering coverage.
+// never heard of: bare hostnames ("wifi", "logon"), local-only DNS suffixes
+// (.local, .lan), and private-range address literals (the gateway a portal
+// redirects to).
+//
+// Those rules are deliberately narrow. Resolving an arbitrary hostname and
+// routing it DIRECT because the answer looks private would hand the filtering
+// decision to whatever resolver the device is talking to: a hostile network —
+// or a public wildcard DNS service like nip.io — could point any name at a LAN
+// address and escape the proxy. Only an address literal is trusted. Local
+// destinations reached that way are still unfiltered and unlogged, so anything
+// running on the LAN is reachable off-proxy; that is the price of a portal
+// login working at all.
 //
 // SECURITY: a PAC file contains ONLY routing rules — hostnames and the proxy
 // host:port. It never contains credentials. Proxy authentication is unchanged:
@@ -55,20 +62,22 @@ var builtinBypass = []string{
 	"neverssl.com",
 }
 
-// privateNets are the address ranges a captive portal's gateway lives in. A
-// host resolving into one of these is on the local network by definition.
+// privateNets are the address ranges a captive portal's gateway lives in.
+// 100.64.0.0/10 (CGNAT) is deliberately absent: it is also Tailscale's range,
+// so an exit node there would be a ready-made full-internet bypass, and portal
+// gateways overwhelmingly sit in 10/8 anyway.
 var privateNets = [][2]string{
 	{"10.0.0.0", "255.0.0.0"},
 	{"172.16.0.0", "255.240.0.0"},
 	{"192.168.0.0", "255.255.0.0"},
 	{"169.254.0.0", "255.255.0.0"}, // link-local
-	{"100.64.0.0", "255.192.0.0"},  // CGNAT, common on in-flight/hotel Wi-Fi
-	{"127.0.0.0", "255.0.0.0"},
+	{"127.0.0.0", "255.0.0.0"},     // the device itself; never reachable via a remote proxy
 }
 
 // Generate renders a PAC file that routes the bypass domain suffixes, the
 // built-in captive-portal set, and local-network destinations DIRECT, and
-// everything else through proxyEndpoint ("host:port").
+// everything else through proxyEndpoint ("host:port"). See the package doc for
+// why the local-network rules are limited to address literals.
 //
 // When directFallback is true the proxy result carries a trailing "; DIRECT",
 // so a client that cannot reach the proxy connects directly instead of failing.
@@ -84,7 +93,8 @@ func Generate(proxyEndpoint string, bypass []string, directFallback bool) string
 	b.WriteString("  var i;\n")
 	b.WriteString("\n")
 	b.WriteString("  // A captive portal is often reached by bare hostname, e.g. just \"wifi\".\n")
-	b.WriteString("  if (isPlainHostName(host)) {\n")
+	b.WriteString("  // An IPv6 literal has no dot either, so exclude it explicitly.\n")
+	b.WriteString("  if (host.indexOf(\":\") === -1 && isPlainHostName(host)) {\n")
 	b.WriteString("    return \"DIRECT\";\n")
 	b.WriteString("  }\n")
 	b.WriteString("\n")
@@ -102,12 +112,12 @@ func Generate(proxyEndpoint string, bypass []string, directFallback bool) string
 	b.WriteString("    }\n")
 	b.WriteString("  }\n")
 	b.WriteString("\n")
-	b.WriteString("  // Portals redirect to the gateway's private address, sometimes by\n")
-	b.WriteString("  // hijacking DNS. Those addresses cannot reach the public internet.\n")
-	b.WriteString("  var ip = dnsResolve(host);\n")
-	b.WriteString("  if (ip) {\n")
+	b.WriteString("  // Portals redirect to the gateway by address. Only an address literal\n")
+	b.WriteString("  // is trusted: resolving a hostname and trusting a private answer would\n")
+	b.WriteString("  // let any network point any name at the LAN and escape the proxy.\n")
+	b.WriteString("  if (/^[0-9]+(\\.[0-9]+){3}$/.test(host)) {\n")
 	for _, n := range privateNets {
-		b.WriteString(fmt.Sprintf("    if (isInNet(ip, %s, %s)) { return \"DIRECT\"; }\n",
+		b.WriteString(fmt.Sprintf("    if (isInNet(host, %s, %s)) { return \"DIRECT\"; }\n",
 			jsString(n[0]), jsString(n[1])))
 	}
 	b.WriteString("  }\n")
@@ -141,14 +151,20 @@ func mergeBypass(bypass []string) []string {
 	return out
 }
 
-// jsRaw sanitizes a value interpolated into a PAC string literal (the proxy
-// endpoint), stripping characters that could break out of the literal.
+// jsRaw strips characters from a value that is embedded in a PAC result string
+// (the proxy endpoint, which comes from the request Host header). jsString
+// already handles quoting, so the load-bearing character here is ";" — it
+// separates entries in a PAC result list and would otherwise let a hostile
+// Host inject a second proxy, or DIRECT.
 func jsRaw(s string) string {
 	return strings.NewReplacer("\"", "", "\n", "", "\r", "", "\\", "", ";", "").Replace(s)
 }
 
-// jsString renders s as a safe double-quoted JavaScript string literal.
+// jsString renders s as a safe double-quoted JavaScript string literal. U+2028
+// and U+2029 are stripped too: Go accepts them in a Host header, and older
+// JavaScript engines treat them as line terminators inside a literal.
 func jsString(s string) string {
-	r := strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "\n", "", "\r", "")
+	r := strings.NewReplacer(
+		"\\", "\\\\", "\"", "\\\"", "\n", "", "\r", "", "\u2028", "", "\u2029", "")
 	return "\"" + r.Replace(s) + "\""
 }

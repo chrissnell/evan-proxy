@@ -64,16 +64,28 @@ func TestGenerateRoutesCaptivePortalNetworksDirect(t *testing.T) {
 
 	for _, want := range []string{
 		"isPlainHostName(host)",
-		`var ip = dnsResolve(host);`,
-		`isInNet(ip, "10.0.0.0", "255.0.0.0")`,
-		`isInNet(ip, "172.16.0.0", "255.240.0.0")`,
-		`isInNet(ip, "192.168.0.0", "255.255.0.0")`,
-		`isInNet(ip, "169.254.0.0", "255.255.0.0")`,
-		`isInNet(ip, "100.64.0.0", "255.192.0.0")`,
+		`isInNet(host, "10.0.0.0", "255.0.0.0")`,
+		`isInNet(host, "172.16.0.0", "255.240.0.0")`,
+		`isInNet(host, "192.168.0.0", "255.255.0.0")`,
+		`isInNet(host, "169.254.0.0", "255.255.0.0")`,
+		`isInNet(host, "127.0.0.0", "255.0.0.0")`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("PAC missing captive-portal rule %q\n---\n%s", want, got)
 		}
+	}
+
+	// The local-network rules must apply to address literals only. Resolving a
+	// hostname and trusting a private answer would let any resolver decide what
+	// skips the proxy. TestPACRoutingDecisions covers the behavior; this guards
+	// the mechanism.
+	if strings.Contains(got, "dnsResolve") {
+		t.Errorf("PAC resolves hostnames to classify them:\n%s", got)
+	}
+	// 100.64/10 is Tailscale's range as well as CGNAT — an exit node there
+	// would be a full-internet bypass.
+	if strings.Contains(got, "100.64.0.0") {
+		t.Errorf("PAC routes the CGNAT range DIRECT:\n%s", got)
 	}
 }
 
