@@ -330,6 +330,10 @@ func (h *Handler) isPACRequest(r *http.Request) bool {
 // hands back is PAC_PROXY_ENDPOINT if configured, otherwise the request's own
 // Host — i.e. the exact host:port the client used to fetch the PAC, which is
 // also the endpoint it should proxy through. The PAC carries no credentials.
+//
+// The response is deliberately cacheable: a captive portal blocks the PAC URL
+// along with everything else, so a device that has to log in has only its
+// cached copy to route by. PAC_CACHE_MAX_AGE=0 restores no-store.
 func (h *Handler) servePAC(w http.ResponseWriter, r *http.Request) {
 	endpoint := h.cfg.PACProxyEndpoint
 	if endpoint == "" {
@@ -339,9 +343,18 @@ func (h *Handler) servePAC(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot determine proxy endpoint", http.StatusBadRequest)
 		return
 	}
-	body := pac.Generate(endpoint, h.cfg.PACBypassDomains)
+	body := pac.Generate(endpoint, h.cfg.PACBypassDomains, h.cfg.PACDirectFallback)
 	w.Header().Set("Content-Type", pac.ContentType)
-	w.Header().Set("Cache-Control", "no-store")
+	// private, not public: the device's own cache is the point, and a captive
+	// portal's interception proxy has no business storing a per-device proxy
+	// configuration. The body varies with Host when PAC_PROXY_ENDPOINT is
+	// unset, so key the cache on it.
+	w.Header().Set("Vary", "Host")
+	if secs := int(h.cfg.PACCacheMaxAge.Seconds()); secs > 0 {
+		w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", secs))
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	w.Write([]byte(body))
 	h.logger.Log(logging.Entry{
 		Timestamp: time.Now(), ClientIP: clientAddr(r), Method: r.Method,

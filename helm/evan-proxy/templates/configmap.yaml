@@ -57,6 +57,13 @@ data:
   {{- if .Values.pac.bypassDomains }}
   PAC_BYPASS_DOMAINS: {{ join "," .Values.pac.bypassDomains | quote }}
   {{- end }}
+  {{- /* kindIs, not truthiness, so an explicit 0 (disable caching) still renders */}}
+  {{- if and (not (kindIs "invalid" .Values.pac.cacheMaxAge)) (ne (printf "%v" .Values.pac.cacheMaxAge) "") }}
+  PAC_CACHE_MAX_AGE: {{ .Values.pac.cacheMaxAge | quote }}
+  {{- end }}
+  {{- if .Values.pac.directFallback }}
+  PAC_DIRECT_FALLBACK: "true"
+  {{- end }}
   {{- end }}
   {{- if .Values.debug.pprofEnabled }}
   # pprof profiling — bound to a loopback listener only, never the admin port
