@@ -87,7 +87,9 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `PAC_ENABLED` | `false` | Serve a PAC file on the proxy port at `PAC_PATH` |
 | `PAC_PATH` | `/proxy.pac` | Request path the PAC is served at |
 | `PAC_PROXY_ENDPOINT` | | Proxy `host:port` the PAC hands back; empty = echo the request's own `Host` (works for NAT/port-forward with no per-user config) |
-| `PAC_BYPASS_DOMAINS` | `venmo.com,paypal.com,paypalobjects.com,braintreegateway.com,braintree-api.com` | Comma-separated domain suffixes routed `DIRECT` (bypassing the proxy) |
+| `PAC_BYPASS_DOMAINS` | `venmo.com,paypal.com,paypalobjects.com,braintreegateway.com,braintree-api.com` | Comma-separated domain suffixes routed `DIRECT` (bypassing the proxy). The OS captive-portal probes (`captive.apple.com`, `connectivitycheck.gstatic.com`, …) and local-only suffixes (`.local`, `.lan`) are always included on top of this list. |
+| `PAC_CACHE_MAX_AGE` | `1h` | `max-age` sent with the PAC response. A captive portal blocks the PAC URL along with everything else, so the device needs a cached copy to have any routing rules while it logs in. `0` sends `Cache-Control: no-store`. |
+| `PAC_DIRECT_FALLBACK` | `false` | Append `; DIRECT` to the PAC's proxy result so a device that cannot reach the proxy connects directly instead of failing. Keeps a captive-portal login working off a cached PAC, but traffic goes **unfiltered** whenever the proxy is unreachable. |
 | `PPROF_ENABLED` | `false` | When `true`, serve Go `pprof` profiling endpoints on a separate loopback listener (`PPROF_LISTEN`). Never served on the admin port. |
 | `PPROF_LISTEN` | `127.0.0.1:6060` | Listen address for the pprof endpoints when `PPROF_ENABLED=true`. Loopback-only by default — reach it with `kubectl port-forward`. |
 
@@ -118,6 +120,43 @@ The PAC routes `PAC_BYPASS_DOMAINS` `DIRECT` and everything else back through th
 In the child's MDM profile, set the Global HTTP Proxy to **Auto** and point `ProxyPACURL` at that URL. (iOS fetches the PAC directly, not through the proxy, so the URL must be reachable off-proxy — which it is, since it's the same endpoint the device already reaches.)
 
 **Security:** a PAC contains only routing rules — hostnames and the proxy `host:port`. It never contains credentials, so the endpoint is safe to expose unauthenticated. Proxy authentication is unchanged: iOS still sends the Basic proxy password (from the MDM profile) directly to the proxy on the 407 challenge. Note that domains routed `DIRECT` are **not** filtered or logged.
+
+### Captive portals (hotel / airport / in-flight Wi-Fi)
+
+A captive portal blocks *all* traffic until you log in — including the PAC URL. So on a portal network the device cannot fetch the PAC, and **iOS then blocks every connection unless the profile says otherwise**:
+
+> `ProxyPACFallbackAllowed` — *If `true`, allows connecting directly to the destination if the proxy autoconfiguration (PAC) file is unreachable.* **Default: `false`.**
+
+That default is why portal logins fail with an otherwise-correct setup. `ProxyCaptiveLoginAllowed` is not a substitute: it lets the device bypass the proxy *server*, but with no PAC the device has no proxy configuration to work from at all. **Both keys are required:**
+
+```xml
+<key>PayloadType</key>
+<string>com.apple.proxy.http.global</string>
+<key>ProxyType</key>
+<string>Auto</string>
+<key>ProxyPACURL</key>
+<string>http://proxy.example.com:17001/proxy.pac</string>
+<!-- Required: without this, iOS blocks all traffic when the PAC is
+     unreachable — which is exactly the state a captive portal creates. -->
+<key>ProxyPACFallbackAllowed</key>
+<true/>
+<!-- Lets the device bypass the proxy to show the portal login page. -->
+<key>ProxyCaptiveLoginAllowed</key>
+<true/>
+```
+
+**Trade-off:** `ProxyPACFallbackAllowed=true` means the device browses unfiltered whenever it cannot fetch the PAC. It self-heals — once the portal login completes, the PAC is reachable again and filtering resumes — but a network that blocks the PAC URL outright (an odd port like `17001` is easy to block) leaves the device unproxied. Publishing the PAC on `443` through an HTTPS ingress makes it much harder to block; iOS 13+ accepts an `https://` `ProxyPACURL`.
+
+Beyond the profile keys, the generated PAC handles portals it has never heard of:
+
+- **Bare hostnames** (`http://wifi`, `http://logon`) → `DIRECT`
+- **Local-only suffixes** (`.local`, `.lan`, `.home`, `.internal`, `.localdomain`) → `DIRECT`
+- **Hosts resolving into a private, link-local, or CGNAT range** (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `100.64/10`) → `DIRECT` — this is the gateway address portals redirect to, including when they hijack DNS
+- **OS portal-detection probes** (`captive.apple.com`, `connectivitycheck.gstatic.com`, …) → `DIRECT`, always, regardless of `PAC_BYPASS_DOMAINS`
+
+None of those addresses can reach the public internet, so routing them `DIRECT` costs no filtering coverage. Portals served from a *public* domain (`deltawifi.com`, `gogoinflight.com`, hotel chains) still need an entry in `PAC_BYPASS_DOMAINS` — and if you also ship an encrypted-DNS (`com.apple.dnsSettings.managed`) payload, the same domains need `DomainAction: NeverConnect` there, or DNS for the portal will fail before routing even matters.
+
+If a portal still fails after all of the above, set `PAC_DIRECT_FALLBACK=true`. The PAC then returns `PROXY host:port; DIRECT`, so the device falls through to a direct connection when the proxy itself does not answer. Use it as a last resort: iOS remembers a failed proxy for a while, so the device can stay unfiltered after a single blip.
 
 ## Downtime Schedules
 
@@ -253,6 +292,12 @@ helm install evan-proxy ./helm/evan-proxy -f my-values.yaml
 | `proxy.dnsProtocol` | string | `""` | DNS protocol: `plain`, `tls`, or `https` (empty = plain) |
 | `proxy.userPortMin` | int | `8080` | First per-user dedicated proxy port |
 | `proxy.userPortMax` | int | `8090` | Last per-user dedicated proxy port |
+| `pac.enabled` | bool | `false` | Serve the PAC file on each proxy port |
+| `pac.path` | string | `"/proxy.pac"` | Request path the PAC is served at |
+| `pac.proxyEndpoint` | string | `""` | Proxy `host:port` the PAC hands back; empty = echo the request's own `Host` |
+| `pac.bypassDomains` | list | `[]` | Domain suffixes routed `DIRECT`; empty = built-in default |
+| `pac.cacheMaxAge` | string | `"1h"` | `max-age` on the PAC response so a device behind a captive portal has a cached copy (`"0"` = `no-store`) |
+| `pac.directFallback` | bool | `false` | Append `; DIRECT` to the PAC's proxy result — fails open (**unfiltered**) when the proxy is unreachable |
 | `metrics.listen` | string | `"0.0.0.0:9091"` | In-pod metrics listen address (bind `0.0.0.0` so the ClusterIP Service can reach it) |
 | `metrics.port` | int | `9091` | Port for the internal metrics ClusterIP Service |
 | `metrics.userLabel` | bool | `false` | Include the per-user (PII) label on request metrics |

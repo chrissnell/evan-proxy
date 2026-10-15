@@ -79,6 +79,18 @@ type Config struct {
 	PACProxyEndpoint string   // proxy "host:port" the PAC returns; empty = echo request Host
 	PACBypassDomains []string // domain suffixes routed DIRECT (bypass proxy)
 
+	// PACCacheMaxAge is the max-age sent with the PAC response. A captive
+	// portal blocks the PAC URL along with everything else, so the device
+	// needs a cached copy to have any routing rules at all while it logs in;
+	// 0 sends Cache-Control: no-store and disables that.
+	PACCacheMaxAge time.Duration
+
+	// PACDirectFallback appends "; DIRECT" to the PAC's proxy result so a
+	// client that cannot reach the proxy connects directly instead of failing.
+	// It keeps a captive-portal login working off a cached PAC, but traffic
+	// then goes unfiltered whenever the proxy is unreachable — opt-in only.
+	PACDirectFallback bool
+
 	// pprof profiling endpoints. Never served on the public admin port. When
 	// enabled they bind a separate loopback listener (PProfListen), reachable
 	// only via `kubectl port-forward`. Off by default.
@@ -129,9 +141,11 @@ func Load() (*Config, error) {
 		PACProxyEndpoint:    os.Getenv("PAC_PROXY_ENDPOINT"),
 		PACBypassDomains: envCSV("PAC_BYPASS_DOMAINS",
 			[]string{"venmo.com", "paypal.com", "paypalobjects.com", "braintreegateway.com", "braintree-api.com"}),
-		PProfEnabled: envBool("PPROF_ENABLED", false),
-		PProfListen:  envOr("PPROF_LISTEN", "127.0.0.1:6060"),
-		DemoMode:     envBool("DEMO_MODE", false),
+		PACCacheMaxAge:    envDuration("PAC_CACHE_MAX_AGE", 1*time.Hour),
+		PACDirectFallback: envBool("PAC_DIRECT_FALLBACK", false),
+		PProfEnabled:      envBool("PPROF_ENABLED", false),
+		PProfListen:       envOr("PPROF_LISTEN", "127.0.0.1:6060"),
+		DemoMode:          envBool("DEMO_MODE", false),
 	}
 
 	// Built-in autocert terminates TLS in-process, so cookies are always served
@@ -180,6 +194,9 @@ func (c *Config) validate() error {
 	}
 	if c.PACEnabled && c.PACPath == "" {
 		return fmt.Errorf("PAC_PATH must not be empty when PAC_ENABLED is true")
+	}
+	if c.PACCacheMaxAge < 0 {
+		return fmt.Errorf("PAC_CACHE_MAX_AGE must be >= 0, got %v", c.PACCacheMaxAge)
 	}
 	for _, cidr := range c.TrustedProxyCIDRs {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {

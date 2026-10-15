@@ -106,6 +106,51 @@ func TestPACServedUnauthenticated(t *testing.T) {
 	}
 }
 
+// TestPACCacheable verifies the PAC is served cacheable when a max-age is
+// configured — a device behind a captive portal cannot refetch it, so the
+// cached copy is the only routing it has while logging in.
+func TestPACCacheable(t *testing.T) {
+	h := setupProxy(t)
+	h.cfg.PACEnabled = true
+	h.cfg.PACPath = "/proxy.pac"
+	h.cfg.PACCacheMaxAge = time.Hour
+
+	req := httptest.NewRequest("GET", "/proxy.pac", nil)
+	req.Host = "proxy.chrissnell.com:17001"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if got, want := w.Header().Get("Cache-Control"), "public, max-age=3600"; got != want {
+		t.Errorf("Cache-Control = %q, want %q", got, want)
+	}
+
+	// Zero disables caching entirely.
+	h.cfg.PACCacheMaxAge = 0
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/proxy.pac", nil))
+	if got := w.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store when max-age is 0", got)
+	}
+}
+
+// TestPACDirectFallback verifies the opt-in proxy result list that lets a
+// client connect directly when the proxy itself is unreachable.
+func TestPACDirectFallback(t *testing.T) {
+	h := setupProxy(t)
+	h.cfg.PACEnabled = true
+	h.cfg.PACPath = "/proxy.pac"
+	h.cfg.PACDirectFallback = true
+
+	req := httptest.NewRequest("GET", "/proxy.pac", nil)
+	req.Host = "proxy.chrissnell.com:17001"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if body := w.Body.String(); !strings.Contains(body, `return "PROXY proxy.chrissnell.com:17001; DIRECT"`) {
+		t.Errorf("PAC missing DIRECT fallback:\n%s", body)
+	}
+}
+
 // TestPACDisabledFallsThrough verifies that when PAC is off, a GET for the PAC
 // path is treated as a normal proxy request (which requires auth → 407).
 func TestPACDisabledFallsThrough(t *testing.T) {

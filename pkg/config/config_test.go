@@ -259,3 +259,48 @@ func TestLoadAutocertImpliesForceHTTPS(t *testing.T) {
 
 // Suppress unused import warning
 var _ = os.Getenv
+
+func TestLoadPACDefaults(t *testing.T) {
+	setEnv(t, validEnv())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.PACCacheMaxAge != time.Hour {
+		t.Errorf("PACCacheMaxAge = %v, want 1h", cfg.PACCacheMaxAge)
+	}
+	// Fail-open routing is a filtering hole, so it must stay opt-in.
+	if cfg.PACDirectFallback {
+		t.Error("PACDirectFallback = true, want false by default")
+	}
+}
+
+func TestLoadPACOverrides(t *testing.T) {
+	env := validEnv()
+	env["PAC_ENABLED"] = "true"
+	env["PAC_CACHE_MAX_AGE"] = "0"
+	env["PAC_DIRECT_FALLBACK"] = "true"
+	setEnv(t, env)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PACCacheMaxAge != 0 {
+		t.Errorf("PACCacheMaxAge = %v, want 0", cfg.PACCacheMaxAge)
+	}
+	if !cfg.PACDirectFallback {
+		t.Error("PACDirectFallback = false, want true")
+	}
+}
+
+func TestLoadNegativePACCacheMaxAge(t *testing.T) {
+	env := validEnv()
+	env["PAC_CACHE_MAX_AGE"] = "-5m"
+	setEnv(t, env)
+
+	if _, err := Load(); err == nil {
+		t.Error("expected error for negative PAC_CACHE_MAX_AGE")
+	}
+}
