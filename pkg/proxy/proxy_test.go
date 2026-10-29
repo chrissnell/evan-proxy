@@ -821,7 +821,7 @@ func TestBlockedUserConnect403Mode(t *testing.T) {
 // proxy) requests from a blocked user always get a 403, regardless of
 // the BlockResponse mode.
 func TestBlockedUserPlainHTTPReturns403(t *testing.T) {
-	for _, mode := range []string{"connect-close", "connect-delay-close", "connect-rst", "connect-403"} {
+	for _, mode := range []string{"connect-close", "connect-delay-close", "connect-rst", "connect-403", "connect-tls-alert"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := baseListenerCfg()
 			cfg.BlockResponse = mode
@@ -860,8 +860,65 @@ func modeIndex(mode string) int {
 		return 2
 	case "connect-403":
 		return 3
+	case "connect-tls-alert":
+		return 4
 	}
 	return 0
+}
+
+// TestBlockedUserConnectTLSAlertMode verifies connect-tls-alert mode: the
+// CONNECT is accepted with 200 Established, then a well-formed TLS fatal
+// alert record (access_denied) is written on the tunnel before the client
+// has a chance to send its ClientHello. iOS parses this as a destination-
+// server TLS failure rather than a proxy error — the only mode confirmed
+// to defeat ProxyPACFallbackAllowed=true PAC fallback.
+func TestBlockedUserConnectTLSAlertMode(t *testing.T) {
+	cfg := baseListenerCfg()
+	cfg.BlockResponse = "connect-tls-alert"
+	h, users := buildHandlerWithUsers(t, cfg)
+
+	if err := users.SetEnabled("alice", false); err != nil {
+		t.Fatal(err)
+	}
+
+	const port = 19100
+	h.StartListener("alice", port)
+	t.Cleanup(func() { h.StopUserListener(port) })
+
+	conn := dialBoundListener(t, port)
+	defer conn.Close()
+
+	fmt.Fprintf(conn, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
+
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatalf("reading CONNECT response: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200 Connection Established, got %d", resp.StatusCode)
+	}
+
+	// Read the TLS alert record off the hijacked tunnel. The response
+	// reader may have already consumed any bytes past the HTTP headers,
+	// so pull from it rather than directly from the conn.
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	alert := make([]byte, 7)
+	if _, err := io.ReadFull(reader, alert); err != nil {
+		t.Fatalf("reading TLS alert record: %v", err)
+	}
+	want := []byte{0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x31}
+	if !bytes.Equal(alert, want) {
+		t.Fatalf("TLS alert record = %x, want %x", alert, want)
+	}
+
+	// Nothing more should follow before close.
+	extra := make([]byte, 1)
+	n, err := reader.Read(extra)
+	if n != 0 || err == nil {
+		t.Fatalf("expected EOF after TLS alert, got n=%d err=%v", n, err)
+	}
 }
 
 // TestBlockedUserPACStillServed verifies the PAC endpoint is served even

@@ -293,6 +293,24 @@ func (h *Handler) serveBlocked(w http.ResponseWriter, r *http.Request, user stri
 		if tc, ok := conn.(*net.TCPConn); ok {
 			_ = tc.SetLinger(0)
 		}
+	case "connect-tls-alert":
+		// TLS 1.2 fatal alert record carrying access_denied(49). Written
+		// on the tunnel immediately after 200 Established so iOS reads
+		// it as "destination server rejected my TLS handshake" rather
+		// than "proxy misbehaved" — the four other modes all fall back
+		// to DIRECT via ProxyPACFallbackAllowed=true because iOS treats
+		// any proxy-layer failure as reason to retry direct, but a TLS
+		// alert looks like a server-side error at the destination.
+		//
+		//   0x15                  ContentType: alert
+		//   0x03 0x03             ProtocolVersion: TLS 1.2
+		//                         (TLS 1.3 handshakes still use 1.2 at
+		//                         the record layer during the initial
+		//                         flight, so this is accepted either way)
+		//   0x00 0x02             Length: 2
+		//   0x02 0x31             AlertLevel: fatal, AlertDescription:
+		//                         access_denied(49)
+		_, _ = conn.Write([]byte{0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x31})
 	}
 	conn.Close()
 }

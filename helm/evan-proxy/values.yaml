@@ -45,14 +45,23 @@ proxy:
   # How the per-user listener responds to blocked (disabled/downtime)
   # requests. The socket always stays bound — if iOS sees a dead port
   # with ProxyPACFallbackAllowed=true it silently falls back to DIRECT,
-  # which defeats the point of blocking the user. Instead we return a
-  # response iOS treats as "upstream dead", not "proxy broken":
-  #   connect-close        CONNECT 200 then FIN close (default)
+  # which defeats the point of blocking the user.
+  #
+  # iOS Safari treats any proxy-layer failure (close, RST, 403) as a
+  # reason to retry DIRECT via PAC fallback (confirmed empirically on
+  # 2026-10-28). The only mode confirmed to defeat PAC fallback is
+  # connect-tls-alert: iOS attributes TLS-layer failures to the
+  # destination server, not the proxy, and does NOT fall back.
+  #
+  #   connect-close        CONNECT 200 then FIN close
   #   connect-delay-close  CONNECT 200, brief sleep, then FIN close
   #   connect-rst          CONNECT 200 then TCP RST close
   #   connect-403          CONNECT 403 Forbidden (no tunnel)
+  #   connect-tls-alert    CONNECT 200 then TLS fatal alert on tunnel
+  #                        (default — defeats iOS PAC fallback)
+  #
   # Plain HTTP (non-CONNECT) always returns 403.
-  blockResponse: "connect-close"
+  blockResponse: "connect-tls-alert"
 
 # PAC (proxy auto-config) — optional.
 # When enabled, the proxy answers an unauthenticated GET at `path` on each proxy

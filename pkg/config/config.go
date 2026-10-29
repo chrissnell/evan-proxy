@@ -60,15 +60,18 @@ type Config struct {
 	// response the proxy returns instead.
 	//
 	//   connect-close        CONNECT -> 200 Established, then immediate FIN
-	//                        (iOS sees the proxy as working, upstream dead;
-	//                        default — most likely to prevent PAC fallback)
+	//                        (iOS falls back DIRECT — confirmed 2026-10-28)
 	//   connect-delay-close  Like connect-close but with a small sleep before
-	//                        FIN, in case a too-fast close trips a heuristic
+	//                        FIN (unlikely to differ from connect-close)
 	//   connect-rst          CONNECT -> 200 Established, then TCP RST close
-	//                        (SO_LINGER=0) — stronger "upstream crashed"
-	//                        signal than FIN
+	//                        (iOS falls back DIRECT — confirmed 2026-10-28)
 	//   connect-403          CONNECT -> 403 Forbidden, no tunnel setup
-	//                        (standards-compliant, iOS fallback unknown)
+	//                        (iOS falls back DIRECT — confirmed 2026-10-28)
+	//   connect-tls-alert    CONNECT -> 200 Established, then write a TLS
+	//                        fatal alert record (access_denied) on the
+	//                        tunnel. iOS attributes the failure to the
+	//                        destination server, not the proxy, so does
+	//                        NOT fall back to DIRECT.
 	//
 	// Plain HTTP (non-CONNECT) always returns 403 regardless of this flag.
 	BlockResponse string
@@ -192,9 +195,9 @@ func (c *Config) validate() error {
 		return fmt.Errorf("USER_PORT_MIN (%d) must be <= USER_PORT_MAX (%d)", c.UserPortMin, c.UserPortMax)
 	}
 	switch c.BlockResponse {
-	case "connect-close", "connect-delay-close", "connect-rst", "connect-403":
+	case "connect-close", "connect-delay-close", "connect-rst", "connect-403", "connect-tls-alert":
 	default:
-		return fmt.Errorf("BLOCK_RESPONSE must be one of connect-close, connect-delay-close, connect-rst, connect-403; got %q", c.BlockResponse)
+		return fmt.Errorf("BLOCK_RESPONSE must be one of connect-close, connect-delay-close, connect-rst, connect-403, connect-tls-alert; got %q", c.BlockResponse)
 	}
 	switch c.LogNetMode {
 	case "", "json-udp", "json-http":
