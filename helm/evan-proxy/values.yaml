@@ -42,6 +42,17 @@ proxy:
   dnsProtocol: ""  # "plain", "tls", or "https" — empty = plain
   userPortMin: 8080  # start of per-user dedicated port range
   userPortMax: 8090  # end of per-user dedicated port range (11 ports)
+  # How the per-user listener responds to blocked (disabled/downtime)
+  # requests. The socket always stays bound — if iOS sees a dead port
+  # with ProxyPACFallbackAllowed=true it silently falls back to DIRECT,
+  # which defeats the point of blocking the user. Instead we return a
+  # response iOS treats as "upstream dead", not "proxy broken":
+  #   connect-close        CONNECT 200 then FIN close (default)
+  #   connect-delay-close  CONNECT 200, brief sleep, then FIN close
+  #   connect-rst          CONNECT 200 then TCP RST close
+  #   connect-403          CONNECT 403 Forbidden (no tunnel)
+  # Plain HTTP (non-CONNECT) always returns 403.
+  blockResponse: "connect-close"
 
 # PAC (proxy auto-config) — optional.
 # When enabled, the proxy answers an unauthenticated GET at `path` on each proxy

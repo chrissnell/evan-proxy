@@ -45,6 +45,8 @@ data:
   {{- end }}
   USER_PORT_MIN: {{ .Values.proxy.userPortMin | quote }}
   USER_PORT_MAX: {{ .Values.proxy.userPortMax | quote }}
+  # Blocked-user response shape — see values.yaml for the trade-offs.
+  BLOCK_RESPONSE: {{ .Values.proxy.blockResponse | default "connect-close" | quote }}
   {{- if .Values.pac.enabled }}
   # PAC endpoint — served on the proxy port at PAC_PATH; contains no credentials
   PAC_ENABLED: "true"
