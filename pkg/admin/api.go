@@ -361,10 +361,18 @@ func (a *api) handleSetEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Listener lifecycle is tied purely to port assignment, not enabled
-	// state — toggling enabled flips the request-layer gate but leaves
-	// the socket bound so iOS doesn't see a dead port and fall back to
-	// DIRECT via ProxyPACFallbackAllowed.
+	// Start or stop the port listener without changing the DB port assignment
+	users, _ := a.users.List()
+	for _, u := range users {
+		if u.Username == req.Username && u.Port > 0 {
+			if req.Enabled {
+				a.ports.StartListener(req.Username, u.Port)
+			} else {
+				a.ports.StopListener(u.Port)
+			}
+			break
+		}
+	}
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -576,10 +584,15 @@ func (a *api) handleDowntimeOverride(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		// Listener was never torn down for downtime (lifecycle is tied
-		// to port assignment only), so clearing the override takes
-		// effect at the request-layer gate immediately — no listener
-		// bounce needed.
+		// Immediately start the user's dedicated port listener so they
+		// don't have to wait for the next reconciler tick.
+		users, _ := a.users.List()
+		for _, u := range users {
+			if u.Username == req.Username && u.Port > 0 {
+				a.ports.StartListener(req.Username, u.Port)
+				break
+			}
+		}
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -618,6 +631,15 @@ func (a *api) handleDowntimeNow(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		// Immediately restart the user's listener so they don't have to wait
+		// for the next reconciler tick — matching the override-clear path.
+		users, _ := a.users.List()
+		for _, u := range users {
+			if u.Username == req.Username && u.Port > 0 && u.Enabled {
+				a.ports.StartListener(req.Username, u.Port)
+				break
+			}
+		}
 	} else {
 		until := time.Now().Add(time.Duration(req.DurationMinutes) * time.Minute)
 		if err := a.users.SetDowntimeUntil(req.Username, until); err != nil {
@@ -629,12 +651,16 @@ func (a *api) handleDowntimeNow(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		// Immediately stop the user's listener so the block takes effect at
+		// once rather than at the next 30-second reconciler tick.
+		users, _ := a.users.List()
+		for _, u := range users {
+			if u.Username == req.Username && u.Port > 0 {
+				a.ports.StopListener(u.Port)
+				break
+			}
+		}
 	}
-	// Both branches: the request-layer gate (userports.serveBlocked) picks
-	// up the new ad-hoc downtime state on the next request. The listener
-	// socket stays bound either way, so iOS keeps seeing a responsive
-	// proxy — the block manifests as "upstream unreachable" to the app
-	// rather than as a dead TCP port that triggers ProxyPACFallbackAllowed.
 	w.WriteHeader(http.StatusOK)
 }
 

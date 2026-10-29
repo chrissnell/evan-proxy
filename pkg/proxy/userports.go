@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"time"
 )
@@ -14,12 +13,7 @@ type UserEnabledChecker interface {
 }
 
 // StartUserListeners loads port assignments from the DB and starts a
-// dedicated HTTP listener for every assigned port. Listeners stay bound for
-// the full lifetime of a port assignment regardless of enabled/downtime
-// state — disabled and downtime users are blocked at the request layer
-// instead (see startListenerLocked and serveBlocked). This keeps the TCP
-// port responsive so iOS clients with ProxyPACFallbackAllowed=true never
-// see "proxy unreachable" and silently fall back to DIRECT.
+// dedicated HTTP listener for each enabled, non-downtime user.
 func (h *Handler) StartUserListeners() error {
 	ports, err := h.portDB.ListPorts()
 	if err != nil {
@@ -34,17 +28,24 @@ func (h *Handler) StartUserListeners() error {
 			h.logger.Infof("userports", "ignoring out-of-range port %d for %q", port, username)
 			continue
 		}
+		if !h.enabledChecker.IsEnabled(username) {
+			h.logger.Infof("userports", "skipping disabled user %q (port %d)", username, port)
+			continue
+		}
+		if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(username) {
+			h.logger.Infof("userports", "skipping downtime user %q (port %d)", username, port)
+			continue
+		}
 		h.portUsers[port] = username
 		h.startListenerLocked(port, username)
 	}
 	return nil
 }
 
-// StartReconciler starts a background goroutine that periodically ensures
-// a dedicated listener is running for every assigned port in the DB and
-// that no stale listeners survive for ports that are no longer assigned.
-// Enabled/downtime state is handled at the request layer, not by binding
-// and unbinding sockets — see serveBlocked.
+// StartReconciler starts a background goroutine that periodically checks
+// downtime and enabled status, stopping/starting dedicated port listeners
+// as needed. This ensures listeners are stopped during downtime windows
+// and restarted when they end.
 func (h *Handler) StartReconciler(interval time.Duration) {
 	h.reconcileStop = make(chan struct{})
 	go func() {
@@ -68,11 +69,9 @@ func (h *Handler) StopReconciler() {
 	}
 }
 
-// reconcileListeners ensures a running listener exists for every assigned
-// port and tears down listeners whose port is no longer assigned.
-// Enabled/downtime state is intentionally NOT consulted here — those are
-// enforced at the request layer so the socket keeps accepting (see
-// serveBlocked). Binding state is tied purely to port assignment.
+// reconcileListeners ensures dedicated port listeners match current
+// enabled + downtime status. Stops listeners for disabled/downtime users
+// and starts them for users who should be active.
 func (h *Handler) reconcileListeners() {
 	ports, err := h.portDB.ListPorts()
 	if err != nil {
@@ -80,10 +79,16 @@ func (h *Handler) reconcileListeners() {
 		return
 	}
 
-	// Every assigned, in-range port should have a running listener.
+	// Determine which ports should have running listeners
 	shouldRun := make(map[int]string)
 	for port, username := range ports {
 		if port < h.cfg.UserPortMin || port > h.cfg.UserPortMax {
+			continue
+		}
+		if !h.enabledChecker.IsEnabled(username) {
+			continue
+		}
+		if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(username) {
 			continue
 		}
 		shouldRun[port] = username
@@ -138,21 +143,6 @@ func (h *Handler) startListenerLocked(port int, username string) {
 		Addr:        fmt.Sprintf(":%d", port),
 		IdleTimeout: h.cfg.IdleTimeout,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Always allow the PAC endpoint through, even when the owning
-			// user is disabled or in downtime: iOS re-fetches /proxy.pac and
-			// treats a failed fetch as "PAC unavailable", which — with
-			// ProxyPACFallbackAllowed=true in the mobileconfig — causes a
-			// silent fallback to DIRECT. That would defeat the whole point
-			// of keeping the port bound to block the user.
-			if h.isPACRequest(r) {
-				h.servePAC(w, r)
-				return
-			}
-			if !h.enabledChecker.IsEnabled(portUser) ||
-				(h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(portUser)) {
-				h.serveBlocked(w, r, portUser)
-				return
-			}
 			ctx := context.WithValue(r.Context(), portOwnerKey, portUser)
 			h.ServeHTTP(w, r.WithContext(ctx))
 		}),
@@ -249,52 +239,6 @@ func (h *Handler) UpdateUserPort(username string, port int) error {
 	h.portMu.Unlock()
 
 	return nil
-}
-
-// serveBlocked handles a request for a user who is disabled or in downtime
-// without closing the port. iOS treats a dead-TCP proxy with
-// ProxyPACFallbackAllowed=true as "proxy broken" and silently falls back to
-// DIRECT; instead we keep the socket responsive and respond in a way iOS
-// treats as "proxy worked, upstream is unreachable" — the connection fails
-// at the app layer rather than disabling the proxy.
-//
-// Plain HTTP (non-CONNECT) always returns 403 — a well-formed HTTP error
-// is unambiguous. CONNECT shape is controlled by cfg.BlockResponse so we
-// can empirically find the response iOS does NOT fall back on.
-func (h *Handler) serveBlocked(w http.ResponseWriter, r *http.Request, user string) {
-	h.logger.Infof("userports", "blocked %s %s for %q (mode=%s)",
-		r.Method, r.Host, user, h.cfg.BlockResponse)
-
-	if r.Method != http.MethodConnect || h.cfg.BlockResponse == "connect-403" {
-		http.Error(w, "blocked", http.StatusForbidden)
-		return
-	}
-
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		http.Error(w, "blocked", http.StatusForbidden)
-		return
-	}
-	conn, _, err := hj.Hijack()
-	if err != nil {
-		return
-	}
-	// Accept the tunnel setup so iOS sees a working proxy, then close.
-	if _, err := conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
-		conn.Close()
-		return
-	}
-	switch h.cfg.BlockResponse {
-	case "connect-delay-close":
-		time.Sleep(50 * time.Millisecond)
-	case "connect-rst":
-		// Make Close() emit a TCP RST rather than FIN — stronger
-		// "upstream crashed" signal that may be less fallback-prone.
-		if tc, ok := conn.(*net.TCPConn); ok {
-			_ = tc.SetLinger(0)
-		}
-	}
-	conn.Close()
 }
 
 // ShutdownUserListeners gracefully stops all per-user listeners.

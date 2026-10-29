@@ -53,26 +53,6 @@ type Config struct {
 	UserPortMin int // first port in range (inclusive)
 	UserPortMax int // last port in range (inclusive)
 
-	// BlockResponse controls how a per-user listener responds when the user
-	// is disabled or in downtime. The listener always stays bound (so an iOS
-	// client with ProxyPACFallbackAllowed=true never sees "proxy unreachable"
-	// and silently falls back to DIRECT); this flag selects the shape of the
-	// response the proxy returns instead.
-	//
-	//   connect-close        CONNECT -> 200 Established, then immediate FIN
-	//                        (iOS sees the proxy as working, upstream dead;
-	//                        default — most likely to prevent PAC fallback)
-	//   connect-delay-close  Like connect-close but with a small sleep before
-	//                        FIN, in case a too-fast close trips a heuristic
-	//   connect-rst          CONNECT -> 200 Established, then TCP RST close
-	//                        (SO_LINGER=0) — stronger "upstream crashed"
-	//                        signal than FIN
-	//   connect-403          CONNECT -> 403 Forbidden, no tunnel setup
-	//                        (standards-compliant, iOS fallback unknown)
-	//
-	// Plain HTTP (non-CONNECT) always returns 403 regardless of this flag.
-	BlockResponse string
-
 	// Logging — console
 	LogFormat string // "json" or "human"
 
@@ -138,7 +118,6 @@ func Load() (*Config, error) {
 		TrustedProxyCIDRs:   envCSV("TRUSTED_PROXY_CIDRS", nil),
 		UserPortMin:         envInt("USER_PORT_MIN", 8081),
 		UserPortMax:         envInt("USER_PORT_MAX", 8090),
-		BlockResponse:       envOr("BLOCK_RESPONSE", "connect-close"),
 		LogFormat:           envOr("LOG_FORMAT", "human"),
 		LogHeaders:          envBool("LOG_HEADERS", false),
 		LogNetMode:          os.Getenv("LOG_NET_MODE"),
@@ -190,11 +169,6 @@ func (c *Config) validate() error {
 	}
 	if c.UserPortMin > c.UserPortMax {
 		return fmt.Errorf("USER_PORT_MIN (%d) must be <= USER_PORT_MAX (%d)", c.UserPortMin, c.UserPortMax)
-	}
-	switch c.BlockResponse {
-	case "connect-close", "connect-delay-close", "connect-rst", "connect-403":
-	default:
-		return fmt.Errorf("BLOCK_RESPONSE must be one of connect-close, connect-delay-close, connect-rst, connect-403; got %q", c.BlockResponse)
 	}
 	switch c.LogNetMode {
 	case "", "json-udp", "json-http":
