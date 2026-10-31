@@ -103,7 +103,18 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data/evan-proxy
+            {{- if .Values.mitm.enabled }}
+            - name: mitm-ca
+              mountPath: /etc/evan-proxy/ca
+              readOnly: true
+            {{- end }}
       volumes:
+        {{- if .Values.mitm.enabled }}
+        - name: mitm-ca
+          secret:
+            secretName: {{ required "mitm.caSecret is required when mitm.enabled is true" .Values.mitm.caSecret }}
+            defaultMode: 0400
+        {{- end }}
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

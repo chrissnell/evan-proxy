@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"evan-proxy/pkg/logging"
+	"evan-proxy/pkg/mitm"
 )
 
 // closeWriter is implemented by connections supporting a TCP half-close
@@ -137,19 +138,90 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Cache successful auth for this IP
 	h.recordAuthSuccess(clientIP, user)
 
-	// Downtime check — user is authenticated but blocked during scheduled downtime
-	if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(user) {
-		conn.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
-		h.logger.Log(logging.Entry{
-			Timestamp: start, ClientIP: clientIP, Method: "CONNECT",
-			Host: host, User: user, Status: 403, Error: "downtime",
-			DurationMS: time.Since(start).Milliseconds(),
-		})
+	// Block check — user is authenticated but their internet is paused.
+	if reason := h.blockReason(user); reason != "" {
+		h.serveBlocked(conn, bufrw, r.Context(), start, clientIP, host, user, reason)
 		return
 	}
 
 	h.connectTunnel(conn, bufrw, r.Context(), start, clientIP, host, user)
 }
+
+// blockReason returns why a user's traffic is currently paused, or "" if it is
+// not. The enabled check is gated on MITM: without it the user's port listener
+// is never bound in the first place, so nothing reaches this path, and leaving
+// it ungated would change the legacy behaviour of every other caller.
+func (h *Handler) blockReason(user string) string {
+	if h.cfg.MITMEnabled && h.enabledChecker != nil && !h.enabledChecker.IsEnabled(user) {
+		return "disabled"
+	}
+	if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(user) {
+		return "downtime"
+	}
+	return ""
+}
+
+// serveBlocked answers a CONNECT from a paused user.
+//
+// With MITM enabled the proxy *succeeds* the connection and serves an HTTPS
+// block page signed for the destination host. That shape matters: iOS Safari
+// with ProxyPACFallbackAllowed=true silently retries DIRECT on every failure
+// shape — closed listener, FIN, RST, 403, TLS alert — so refusing the
+// connection lets a paused kid browse around the proxy entirely. Apple's push
+// and iCloud endpoints stay on plain passthrough so iMessage and Find My keep
+// working during a pause.
+//
+// Without MITM this falls back to the legacy 403.
+func (h *Handler) serveBlocked(conn net.Conn, bufrw *bufio.ReadWriter, baseCtx context.Context, start time.Time, clientIP, host, user, reason string) {
+	if !h.cfg.MITMEnabled || h.mitm == nil {
+		conn.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
+		h.logger.Log(logging.Entry{
+			Timestamp: start, ClientIP: clientIP, Method: "CONNECT",
+			Host: host, User: user, Status: 403, Error: reason,
+			DurationMS: time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
+	if mitm.Passthrough(host) {
+		h.logger.Log(logging.Entry{
+			Timestamp: start, Event: "mitm_passthrough", ClientIP: clientIP,
+			Method: "CONNECT", Host: host, User: user, Status: 200,
+		})
+		h.connectTunnel(conn, bufrw, baseCtx, start, clientIP, host, user)
+		return
+	}
+
+	conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+
+	// The hijack handed us a bufio.Reader that may already hold bytes read off
+	// the socket — the ClientHello can arrive in the same segment as the
+	// CONNECT. Hand the TLS server the buffer, not the raw conn, or those bytes
+	// are lost and the handshake stalls.
+	if err := h.mitm.ServeBlockPage(bufferedConn{Conn: conn, r: bufrw.Reader}, host, user); err != nil {
+		h.logger.Log(logging.Entry{
+			Timestamp: start, Event: "mitm_error", ClientIP: clientIP,
+			Method: "CONNECT", Host: host, User: user, Status: 200,
+			Error: err.Error(), DurationMS: time.Since(start).Milliseconds(),
+		})
+		return
+	}
+
+	h.logger.Log(logging.Entry{
+		Timestamp: start, Event: "mitm_served", ClientIP: clientIP,
+		Method: "CONNECT", Host: host, User: user, Status: 200,
+		Error: reason, DurationMS: time.Since(start).Milliseconds(),
+	})
+}
+
+// bufferedConn reads through a bufio.Reader layered over conn, so bytes the
+// hijack already pulled off the socket are seen before any fresh read.
+type bufferedConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func (c bufferedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
 // connectTunnel establishes the CONNECT tunnel after authentication succeeds.
 // Handles ACL check, DNS resolution, dialing, and bidirectional copy.

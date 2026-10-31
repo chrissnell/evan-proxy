@@ -41,6 +41,13 @@ type DowntimeChecker interface {
 	IsInDowntime(username string) bool
 }
 
+// BlockPageServer terminates TLS on a hijacked CONNECT and serves the block
+// page for a user whose internet is paused. Satisfied by *mitm.Server; an
+// interface so the connect-path tests can stub it without real TLS.
+type BlockPageServer interface {
+	ServeBlockPage(conn net.Conn, host, user string) error
+}
+
 // DNSObserver receives DNS lookup metrics.
 type DNSObserver interface {
 	ObserveDNS(d time.Duration, result string)
@@ -98,6 +105,7 @@ type Handler struct {
 	cfg             *config.Config
 	defaultResolver *edns.Resolver
 	dnsObs          DNSObserver
+	mitm            BlockPageServer
 
 	// IP-based auth cache: after a client authenticates, allow subsequent
 	// requests from the same IP without re-challenging. This handles
@@ -213,6 +221,12 @@ func New(cfg *config.Config, users UserChecker, dnsGetter UserDNSGetter, portDB 
 	h.dial = dialWithBlockCheck
 
 	return h
+}
+
+// SetMITM installs the block-page server used when a blocked user's CONNECT
+// must be answered instead of refused. Nil (the default) keeps the legacy 403.
+func (h *Handler) SetMITM(s BlockPageServer) {
+	h.mitm = s
 }
 
 // resolverFromCtx returns the per-user resolver from context, or the global default.

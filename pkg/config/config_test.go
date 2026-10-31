@@ -259,3 +259,97 @@ func TestLoadAutocertImpliesForceHTTPS(t *testing.T) {
 
 // Suppress unused import warning
 var _ = os.Getenv
+
+func TestLoadMITMDefaults(t *testing.T) {
+	setEnv(t, validEnv())
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MITMEnabled {
+		t.Error("MITM must be off unless explicitly enabled")
+	}
+	if cfg.MITMLeafTTL != 168*time.Hour {
+		t.Errorf("MITMLeafTTL = %v, want 168h", cfg.MITMLeafTTL)
+	}
+	if cfg.MITMCertCacheSize != 1000 {
+		t.Errorf("MITMCertCacheSize = %d, want 1000", cfg.MITMCertCacheSize)
+	}
+}
+
+func TestLoadMITMEnabled(t *testing.T) {
+	env := validEnv()
+	env["MITM_ENABLED"] = "true"
+	env["MITM_CA_CERT_FILE"] = "/etc/evan-proxy/ca/ca.crt"
+	env["MITM_CA_KEY_FILE"] = "/etc/evan-proxy/ca/ca.key"
+	env["MITM_LEAF_TTL"] = "24h"
+	env["MITM_CERT_CACHE_SIZE"] = "32"
+	setEnv(t, env)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.MITMEnabled {
+		t.Error("MITMEnabled = false")
+	}
+	if cfg.MITMCACertFile != "/etc/evan-proxy/ca/ca.crt" || cfg.MITMCAKeyFile != "/etc/evan-proxy/ca/ca.key" {
+		t.Errorf("CA paths = %q / %q", cfg.MITMCACertFile, cfg.MITMCAKeyFile)
+	}
+	if cfg.MITMLeafTTL != 24*time.Hour {
+		t.Errorf("MITMLeafTTL = %v, want 24h", cfg.MITMLeafTTL)
+	}
+	if cfg.MITMCertCacheSize != 32 {
+		t.Errorf("MITMCertCacheSize = %d, want 32", cfg.MITMCertCacheSize)
+	}
+}
+
+// Enabling MITM without CA material would leave every blocked CONNECT failing
+// at startup, so it must be rejected up front rather than at the first block.
+func TestLoadMITMRequiresCAMaterial(t *testing.T) {
+	tests := map[string]map[string]string{
+		"no cert or key": {"MITM_ENABLED": "true"},
+		"cert only":      {"MITM_ENABLED": "true", "MITM_CA_CERT_FILE": "/ca.crt"},
+		"key only":       {"MITM_ENABLED": "true", "MITM_CA_KEY_FILE": "/ca.key"},
+	}
+	for name, extra := range tests {
+		t.Run(name, func(t *testing.T) {
+			env := validEnv()
+			for k, v := range extra {
+				env[k] = v
+			}
+			setEnv(t, env)
+			if _, err := Load(); err == nil {
+				t.Error("expected an error")
+			}
+		})
+	}
+}
+
+func TestLoadMITMRejectsBadTunables(t *testing.T) {
+	base := func() map[string]string {
+		env := validEnv()
+		env["MITM_ENABLED"] = "true"
+		env["MITM_CA_CERT_FILE"] = "/ca.crt"
+		env["MITM_CA_KEY_FILE"] = "/ca.key"
+		return env
+	}
+
+	t.Run("zero leaf TTL", func(t *testing.T) {
+		env := base()
+		env["MITM_LEAF_TTL"] = "0s"
+		setEnv(t, env)
+		if _, err := Load(); err == nil {
+			t.Error("expected an error for a zero leaf TTL")
+		}
+	})
+
+	t.Run("empty cache", func(t *testing.T) {
+		env := base()
+		env["MITM_CERT_CACHE_SIZE"] = "0"
+		setEnv(t, env)
+		if _, err := Load(); err == nil {
+			t.Error("expected an error for a zero-size cert cache")
+		}
+	})
+}

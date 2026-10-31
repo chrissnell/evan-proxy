@@ -58,6 +58,15 @@ data:
   PAC_BYPASS_DOMAINS: {{ join "," .Values.pac.bypassDomains | quote }}
   {{- end }}
   {{- end }}
+  {{- if .Values.mitm.enabled }}
+  # TLS-terminating block page for paused users. The CA keypair is mounted from
+  # .Values.mitm.caSecret; the proxy refuses to start without it.
+  MITM_ENABLED: "true"
+  MITM_CA_CERT_FILE: "/etc/evan-proxy/ca/ca.crt"
+  MITM_CA_KEY_FILE: "/etc/evan-proxy/ca/ca.key"
+  MITM_LEAF_TTL: {{ .Values.mitm.leafTTL | quote }}
+  MITM_CERT_CACHE_SIZE: {{ .Values.mitm.certCacheSize | quote }}
+  {{- end }}
   {{- if .Values.debug.pprofEnabled }}
   # pprof profiling — bound to a loopback listener only, never the admin port
   PPROF_ENABLED: "true"

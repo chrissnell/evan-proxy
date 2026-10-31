@@ -85,6 +85,18 @@ type Config struct {
 	PProfEnabled bool
 	PProfListen  string // "host:port" — default "127.0.0.1:6060" (loopback only)
 
+	// MITM terminates TLS on a hijacked CONNECT for *blocked* users (disabled
+	// or in a downtime window) and serves an HTTPS block page signed by a
+	// device-trusted root CA. iOS Safari with PAC fallback enabled retries
+	// DIRECT on every proxy failure shape, so succeeding the connection on our
+	// own terms is the only way a block actually blocks. Normal operation is
+	// untouched CONNECT passthrough. See .context/mitm-design.md.
+	MITMEnabled       bool
+	MITMCACertFile    string        // PEM CA certificate
+	MITMCAKeyFile     string        // PEM CA private key
+	MITMLeafTTL       time.Duration // validity of each minted leaf cert
+	MITMCertCacheSize int           // max minted leaves held in the LRU
+
 	// DemoMode runs the full admin API and user-management flow without ever
 	// binding a real per-user proxy socket. Enabling a user's proxy updates the
 	// database and the API reports it as active, but no proxy listener opens and
@@ -132,6 +144,12 @@ func Load() (*Config, error) {
 		PProfEnabled: envBool("PPROF_ENABLED", false),
 		PProfListen:  envOr("PPROF_LISTEN", "127.0.0.1:6060"),
 		DemoMode:     envBool("DEMO_MODE", false),
+
+		MITMEnabled:       envBool("MITM_ENABLED", false),
+		MITMCACertFile:    os.Getenv("MITM_CA_CERT_FILE"),
+		MITMCAKeyFile:     os.Getenv("MITM_CA_KEY_FILE"),
+		MITMLeafTTL:       envDuration("MITM_LEAF_TTL", 168*time.Hour),
+		MITMCertCacheSize: envInt("MITM_CERT_CACHE_SIZE", 1000),
 	}
 
 	// Built-in autocert terminates TLS in-process, so cookies are always served
@@ -191,6 +209,17 @@ func (c *Config) validate() error {
 	}
 	if c.AdminLoginWindow <= 0 {
 		return fmt.Errorf("ADMIN_LOGIN_WINDOW must be > 0, got %v", c.AdminLoginWindow)
+	}
+	if c.MITMEnabled {
+		if c.MITMCACertFile == "" || c.MITMCAKeyFile == "" {
+			return fmt.Errorf("MITM_CA_CERT_FILE and MITM_CA_KEY_FILE are required when MITM_ENABLED is true")
+		}
+		if c.MITMLeafTTL <= 0 {
+			return fmt.Errorf("MITM_LEAF_TTL must be > 0, got %v", c.MITMLeafTTL)
+		}
+		if c.MITMCertCacheSize < 1 {
+			return fmt.Errorf("MITM_CERT_CACHE_SIZE must be >= 1, got %d", c.MITMCertCacheSize)
+		}
 	}
 	return nil
 }

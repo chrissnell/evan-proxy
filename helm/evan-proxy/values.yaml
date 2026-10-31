@@ -61,6 +61,29 @@ pac:
   # (venmo.com, paypal.com, paypalobjects.com, braintreegateway.com, braintree-api.com).
   bypassDomains: []
 
+# TLS-terminating block page ("MITM"). When a user is paused — disabled or in a
+# downtime window — the proxy answers their CONNECT with 200, terminates TLS
+# itself using a leaf certificate minted for the destination host, and serves an
+# HTTPS block page. iOS Safari with PAC fallback enabled silently retries DIRECT
+# on every proxy *failure* shape, so succeeding the connection is the only way a
+# pause actually pauses. Normal (unpaused) traffic is untouched passthrough.
+#
+# Phase 1: the CA comes from a Secret you create by hand with
+# ./scripts/gen-dev-ca.sh, and the Apple-services bypass is hardcoded in the
+# binary. Phase 3 moves the CA into Vault; Phase 2 replaces the bypass with an
+# editable allowlist. See .context/mitm-design.md.
+mitm:
+  enabled: false
+  # Existing Secret holding the CA keypair under the keys `ca.crt` and `ca.key`,
+  # mounted read-only at /etc/evan-proxy/ca. Required when enabled:
+  #   kubectl -n evan-proxy create secret generic evan-proxy-ca \
+  #     --from-file=ca.crt=scratch/dev-ca.crt --from-file=ca.key=scratch/dev-ca.key
+  caSecret: ""
+  # Validity of each minted leaf certificate.
+  leafTTL: "168h"
+  # Maximum minted leaves held in memory, keyed by hostname.
+  certCacheSize: 1000
+
 # Debug endpoints — opt-in pprof profiling.
 # Never served on the public admin port. When enabled, pprof binds a separate
 # loopback listener (`pprofListen`), reachable only from inside the pod via

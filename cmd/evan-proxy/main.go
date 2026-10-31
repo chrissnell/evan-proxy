@@ -16,6 +16,7 @@ import (
 	"evan-proxy/pkg/config"
 	"evan-proxy/pkg/logging"
 	"evan-proxy/pkg/metrics"
+	"evan-proxy/pkg/mitm"
 	"evan-proxy/pkg/proxy"
 	"evan-proxy/pkg/ratelimit"
 	"evan-proxy/pkg/stats"
@@ -101,6 +102,24 @@ func main() {
 	if cfg.DemoMode {
 		logger.Infof("proxy", "DEMO MODE enabled: full admin API active, but no real per-user proxy listeners will bind")
 		adminHandler = admin.LogRequests(logger, adminServer)
+	}
+
+	// Block-page TLS interception. When enabled, a paused user's CONNECT is
+	// answered with a forged-cert HTTPS block page instead of being refused —
+	// the only shape iOS Safari treats as final when PAC fallback is on.
+	if cfg.MITMEnabled {
+		ca, err := mitm.LoadCA(cfg.MITMCACertFile, cfg.MITMCAKeyFile, mitm.Options{
+			LeafTTL:   cfg.MITMLeafTTL,
+			CacheSize: cfg.MITMCertCacheSize,
+		})
+		if err != nil {
+			logger.Fatalf("mitm", "%v", err)
+		}
+		proxyHandler.SetMITM(mitm.NewServer(ca, mitm.ServerOptions{}))
+		logger.Infof("mitm", "block page enabled — CA %q, leaf TTL %s, cache %d",
+			ca.Subject(), cfg.MITMLeafTTL, cfg.MITMCertCacheSize)
+	} else {
+		logger.Infof("mitm", "block page disabled — paused users get a 403")
 	}
 
 	// Per-user dedicated port listeners

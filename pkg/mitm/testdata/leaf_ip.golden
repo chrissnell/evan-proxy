@@ -1,0 +1,10 @@
+SerialNumber: 123456789abcdef0123456789abcdef
+CommonName: 93.184.215.14
+NotBefore: 2026-03-01T11:00:00Z
+NotAfter: 2026-03-08T12:00:00Z
+KeyUsage: 5
+ExtKeyUsage: [serverAuth]
+DNSNames: []
+IPAddresses: [93.184.215.14]
+IsCA: false
+BasicConstraintsValid: true
