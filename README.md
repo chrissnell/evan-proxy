@@ -37,6 +37,7 @@ To make this work, follow this plan:
 - DNS-over-TLS (DoT) and DNS-over-HTTPS (DoH) support
 - DNS-level block detection (returns 523 for DNS-blocked domains)
 - Downtime schedules — set per-user internet access windows by day of week, with support for multiple windows per day and overnight spans; temporary overrides let you suspend downtime for 15 minutes to 12 hours without changing the schedule, and ad-hoc downtime cuts a user off immediately for 15 minutes to a week
+- Optional block page while a user is paused, so a paused iPhone can't quietly route around the proxy (off by default)
 - Prometheus metrics on a dedicated internal listener (kept off the public admin port)
 
 ## Configuration
@@ -145,6 +146,32 @@ Without this, the container defaults to UTC and downtime windows won't match you
 
 ## Blocking that actually blocks (MITM block page)
 
+When you pause a kid — switch them off in the admin UI, or let a downtime
+window start — websites should stop loading. On an iPhone, they didn't.
+
+iOS has a safety valve: if the proxy looks broken, Safari quietly ignores it and
+connects directly instead. That valve is why you can still get online at an
+airport, so you want it. But to iOS, "paused" and "broken" look identical — so a
+paused kid sailed straight around the proxy and kept browsing.
+
+The fix is to stop looking broken. During a pause the proxy answers the
+connection instead of refusing it, and serves a page: a photo of Pancho, the
+site they tried to visit, and the time their internet was paused. Safari sees a
+page load successfully, so it has no reason to go around anything. iMessage,
+Find My, iCloud and the App Store keep working throughout — only browsing stops.
+
+**This is optional and off by default.** Leave it off and pausing works the way
+it always has: the kid's proxy port closes and connections are refused. Turning
+it on also means installing a certificate on their device (below); without it
+they get a certificate warning instead of the page — still blocked, just uglier.
+
+To serve that page the proxy has to decrypt the connection, so it is worth being
+precise about when: **only** while a user is paused, and never for the Apple
+endpoints listed below. Normal, unpaused traffic is an opaque tunnel the proxy
+cannot see inside, exactly as before.
+
+### Why it works this way
+
 Refusing a paused user's connection does not stop them on iOS. With
 `ProxyPACFallbackAllowed=true` — which captive portals at airports need —
 Safari silently retries **DIRECT** on every proxy failure shape: a closed
@@ -158,10 +185,6 @@ TLS itself using a leaf certificate minted on the fly for the destination
 hostname and signed by a root CA the device already trusts, and serves a real
 HTTPS block page. Safari sees a completed HTTPS exchange with the destination,
 under the destination's own URL, and has no reason to fall back.
-
-This engages **only** while a user is paused — disabled or inside a downtime
-window. Normal traffic is untouched `CONNECT` passthrough; the proxy never sees
-inside it.
 
 Apple's own endpoints (`*.apple.com`, `*.icloud.com`, push, App Store, software
 update) stay on plain passthrough even during a block, so iMessage and Find My
