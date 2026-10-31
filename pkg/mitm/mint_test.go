@@ -121,3 +121,43 @@ func TestNormalizeHost(t *testing.T) {
 		}
 	}
 }
+
+// A leaf cached for a hot hostname must be re-minted once it nears expiry. The
+// cache is bounded by count, not age, so without that check a pod alive longer
+// than LeafTTL serves an expired certificate and Safari shows a cert warning
+// instead of the block page.
+func TestCertForRemintsExpiringLeaf(t *testing.T) {
+	now := time.Now()
+	ca := testCA(t, Options{LeafTTL: time.Hour, Now: func() time.Time { return now }})
+
+	first, err := ca.certFor("example.com", "")
+	if err != nil {
+		t.Fatalf("first certFor: %v", err)
+	}
+
+	// Still fresh: the same cached leaf comes back.
+	now = now.Add(30 * time.Minute)
+	cached, err := ca.certFor("example.com", "")
+	if err != nil {
+		t.Fatalf("cached certFor: %v", err)
+	}
+	if cached.Leaf.SerialNumber.Cmp(first.Leaf.SerialNumber) != 0 {
+		t.Error("re-minted a leaf that was still fresh")
+	}
+
+	// Past expiry: a new leaf, valid at the current clock.
+	now = now.Add(time.Hour)
+	renewed, err := ca.certFor("example.com", "")
+	if err != nil {
+		t.Fatalf("renewed certFor: %v", err)
+	}
+	if renewed.Leaf.SerialNumber.Cmp(first.Leaf.SerialNumber) == 0 {
+		t.Fatal("served the expired leaf from cache instead of re-minting")
+	}
+	if !now.Before(renewed.Leaf.NotAfter) {
+		t.Errorf("renewed leaf already expired: NotAfter=%s, now=%s", renewed.Leaf.NotAfter, now)
+	}
+	if renewed.Leaf.DNSNames[0] != "example.com" {
+		t.Errorf("renewed leaf DNS name = %q, want example.com", renewed.Leaf.DNSNames[0])
+	}
+}

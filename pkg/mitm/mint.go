@@ -21,6 +21,13 @@ const (
 	// leafBackdate absorbs client clock skew: a device a few minutes fast must
 	// not see a not-yet-valid certificate.
 	leafBackdate = time.Hour
+
+	// leafRenewBefore retires a cached leaf this long before it expires. The
+	// cache is bounded by count, not age, so a hot entry would otherwise be
+	// served past its own NotAfter once the pod outlives LeafTTL — and an
+	// expired certificate means a Safari cert warning instead of the block
+	// page. The margin also stops a leaf expiring mid-page-load.
+	leafRenewBefore = time.Minute
 )
 
 // certFor returns a leaf for this handshake, minting one on a cache miss.
@@ -29,7 +36,7 @@ const (
 // request's host (with or without a port, "" if unknown).
 func (c *CA) certFor(sni, target string) (*tls.Certificate, error) {
 	name, isIP := leafIdentity(sni, target)
-	if cert, ok := c.cache.get(name); ok {
+	if cert, ok := c.cache.get(name); ok && c.leafFresh(cert) {
 		return cert, nil
 	}
 
@@ -47,6 +54,11 @@ func (c *CA) certFor(sni, target string) (*tls.Certificate, error) {
 		c.cache.put(name, cert)
 	}
 	return cert, nil
+}
+
+// leafFresh reports whether a cached leaf has enough validity left to serve.
+func (c *CA) leafFresh(cert *tls.Certificate) bool {
+	return cert.Leaf != nil && c.opts.Now().Add(leafRenewBefore).Before(cert.Leaf.NotAfter)
 }
 
 // leafIdentity resolves the name a leaf must certify, preferring the SNI the
