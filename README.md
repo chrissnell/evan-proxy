@@ -88,6 +88,11 @@ htpasswd -nbBC 10 "" 'yourpassword' | cut -d: -f2
 | `PAC_PATH` | `/proxy.pac` | Request path the PAC is served at |
 | `PAC_PROXY_ENDPOINT` | | Proxy `host:port` the PAC hands back; empty = echo the request's own `Host` (works for NAT/port-forward with no per-user config) |
 | `PAC_BYPASS_DOMAINS` | `venmo.com,paypal.com,paypalobjects.com,braintreegateway.com,braintree-api.com` | Comma-separated domain suffixes routed `DIRECT` (bypassing the proxy) |
+| `MITM_ENABLED` | `false` | Serve a TLS-terminated HTTPS block page to paused users instead of refusing their CONNECT. See [Blocking that actually blocks](#blocking-that-actually-blocks-mitm-block-page). |
+| `MITM_CA_CERT_FILE` | | PEM root CA certificate used to sign forged leaf certs. Required when `MITM_ENABLED=true`. |
+| `MITM_CA_KEY_FILE` | | PEM private key for `MITM_CA_CERT_FILE`. Required when `MITM_ENABLED=true`. |
+| `MITM_LEAF_TTL` | `168h` | Validity of each minted leaf certificate |
+| `MITM_CERT_CACHE_SIZE` | `1000` | Maximum minted leaf certificates held in memory, keyed by hostname |
 | `PPROF_ENABLED` | `false` | When `true`, serve Go `pprof` profiling endpoints on a separate loopback listener (`PPROF_LISTEN`). Never served on the admin port. |
 | `PPROF_LISTEN` | `127.0.0.1:6060` | Listen address for the pprof endpoints when `PPROF_ENABLED=true`. Loopback-only by default — reach it with `kubectl port-forward`. |
 
@@ -137,6 +142,86 @@ timezone: "America/Denver"   # IANA timezone, e.g. America/Los_Angeles, US/Easte
 ```
 
 Without this, the container defaults to UTC and downtime windows won't match your local time.
+
+## Blocking that actually blocks (MITM block page)
+
+Refusing a paused user's connection does not stop them on iOS. With
+`ProxyPACFallbackAllowed=true` — which captive portals at airports need —
+Safari silently retries **DIRECT** on every proxy failure shape: a closed
+listener, a `200` followed by FIN, a `200` followed by RST, a `403`, and a `200`
+followed by a TLS fatal alert were all tested and all fell back. Turning PAC
+fallback off blocks correctly and breaks captive portals.
+
+So during a block the proxy stops failing and starts *succeeding*, on its own
+terms. It answers the `CONNECT` with `200 Connection Established`, terminates
+TLS itself using a leaf certificate minted on the fly for the destination
+hostname and signed by a root CA the device already trusts, and serves a real
+HTTPS block page. Safari sees a completed HTTPS exchange with the destination,
+under the destination's own URL, and has no reason to fall back.
+
+This engages **only** while a user is paused — disabled or inside a downtime
+window. Normal traffic is untouched `CONNECT` passthrough; the proxy never sees
+inside it.
+
+Apple's own endpoints (`*.apple.com`, `*.icloud.com`, push, App Store, software
+update) stay on plain passthrough even during a block, so iMessage and Find My
+keep working while a kid's internet is paused.
+
+### Setting it up
+
+Generate a throwaway CA and the profile that installs it:
+
+```bash
+./scripts/gen-dev-ca.sh                   # writes scratch/dev-ca.{crt,key,mobileconfig}
+```
+
+Install `scratch/dev-ca.mobileconfig` on the device (AirDrop or email), then turn
+the CA on under **Settings → General → About → Certificate Trust Settings** —
+iOS does not trust a manually installed root until that switch is flipped.
+
+Run the proxy with the CA:
+
+```bash
+MITM_ENABLED=true \
+MITM_CA_CERT_FILE=scratch/dev-ca.crt \
+MITM_CA_KEY_FILE=scratch/dev-ca.key \
+./evan-proxy
+```
+
+In Kubernetes, put the keypair in a Secret and point the chart at it:
+
+```bash
+kubectl -n evan-proxy create secret generic evan-proxy-ca \
+  --from-file=ca.crt=scratch/dev-ca.crt \
+  --from-file=ca.key=scratch/dev-ca.key
+```
+
+```yaml
+# values.yaml
+mitm:
+  enabled: true
+  caSecret: evan-proxy-ca
+```
+
+A device that never got the CA sees a certificate error instead of the block
+page. That still blocks — Safari treats a certificate error as terminal — it is
+just less friendly.
+
+### What changes while MITM is on
+
+- A paused user's dedicated proxy port **stays bound**. Closing it is exactly the
+  failure shape Safari falls back from, so the block moves from the socket to
+  the request path.
+- Pausing a user no longer stops their listener; it changes what the listener
+  answers with.
+- Turning `MITM_ENABLED` off restores the previous behaviour (closed port,
+  `403`) with no other changes.
+
+Log events to watch: `mitm_served` (block page delivered), `mitm_passthrough`
+(Apple host tunnelled through a block), `mitm_error` (handshake or write
+failed — most often a device without the CA installed).
+
+Design and roadmap: [`.context/mitm-design.md`](.context/mitm-design.md).
 
 ## Metrics
 

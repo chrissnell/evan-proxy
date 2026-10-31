@@ -12,8 +12,24 @@ type UserEnabledChecker interface {
 	IsEnabled(username string) bool
 }
 
+// listenerWanted reports whether a user's dedicated port should be bound.
+//
+// Without MITM, closing the port *is* the block, so a disabled or in-downtime
+// user gets no listener. With MITM the port must stay bound through a block:
+// the proxy answers the CONNECT itself and serves the block page, and a closed
+// port is precisely the failure shape that makes iOS Safari fall back DIRECT.
+func (h *Handler) listenerWanted(username string) bool {
+	if h.cfg.MITMEnabled {
+		return true
+	}
+	if !h.enabledChecker.IsEnabled(username) {
+		return false
+	}
+	return h.downtimeChecker == nil || !h.downtimeChecker.IsInDowntime(username)
+}
+
 // StartUserListeners loads port assignments from the DB and starts a
-// dedicated HTTP listener for each enabled, non-downtime user.
+// dedicated HTTP listener for each user that wants one (see listenerWanted).
 func (h *Handler) StartUserListeners() error {
 	ports, err := h.portDB.ListPorts()
 	if err != nil {
@@ -28,12 +44,8 @@ func (h *Handler) StartUserListeners() error {
 			h.logger.Infof("userports", "ignoring out-of-range port %d for %q", port, username)
 			continue
 		}
-		if !h.enabledChecker.IsEnabled(username) {
-			h.logger.Infof("userports", "skipping disabled user %q (port %d)", username, port)
-			continue
-		}
-		if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(username) {
-			h.logger.Infof("userports", "skipping downtime user %q (port %d)", username, port)
+		if !h.listenerWanted(username) {
+			h.logger.Infof("userports", "skipping paused user %q (port %d)", username, port)
 			continue
 		}
 		h.portUsers[port] = username
@@ -85,10 +97,7 @@ func (h *Handler) reconcileListeners() {
 		if port < h.cfg.UserPortMin || port > h.cfg.UserPortMax {
 			continue
 		}
-		if !h.enabledChecker.IsEnabled(username) {
-			continue
-		}
-		if h.downtimeChecker != nil && h.downtimeChecker.IsInDowntime(username) {
+		if !h.listenerWanted(username) {
 			continue
 		}
 		shouldRun[port] = username
@@ -192,16 +201,30 @@ func (h *Handler) StopUserListener(port int) {
 	}
 }
 
-// StartListener starts a listener for a user on a specific port (without DB changes).
+// StartListener starts a listener for a user on a specific port (without DB
+// changes). Idempotent: a port that is already bound is left alone rather than
+// bound twice, which would orphan the running server behind a failed one.
 func (h *Handler) StartListener(username string, port int) {
 	h.portMu.Lock()
+	defer h.portMu.Unlock()
+
 	h.portUsers[port] = username
+	if _, running := h.userServers[port]; running {
+		return
+	}
 	h.startListenerLocked(port, username)
-	h.portMu.Unlock()
 }
 
 // StopListener stops a listener on a specific port (without DB changes).
+//
+// No-op with MITM enabled: pausing a user must not close their port there, or
+// iOS Safari sees a dead listener and falls back DIRECT. The block is served by
+// the connect path instead. Port *reassignment* still closes the old port — it
+// goes through StopUserListener.
 func (h *Handler) StopListener(port int) {
+	if h.cfg.MITMEnabled {
+		return
+	}
 	h.StopUserListener(port)
 }
 
