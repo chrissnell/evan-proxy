@@ -1,12 +1,11 @@
 # `pancho.jpg`
 
-The image embedded in the block page (`blockpage.go`).
+The photo embedded in the block page (`blockpage.go`).
 
-The committed file is a **placeholder** — a paw print in the page's palette, not
-a photo. Replace it with the real head-tilt photo of Pancho: ~800px wide, JPEG
-quality 75 (keeps it in the 60–80KB range). It is inlined into the page as a
-`data:` URI, so the block page is a single response with no subresource
-requests; anything much larger makes that response needlessly fat.
+800×800, JPEG quality 72, ~79KB. It is inlined into the page as a `data:` URI so
+the block page is a single response with no subresource requests — a subresource
+would leave the tunnel and need its own interception — which is why the size
+matters more here than for an ordinary web image.
 
-No code change is needed after swapping the file — `go:embed` picks it up at
-build time.
+To replace it: crop square, scale to 800px, and keep the encode in the 60–80KB
+range. No code change is needed — `go:embed` picks the file up at build time.
